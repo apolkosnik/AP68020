@@ -1,4 +1,4 @@
-// AP68030 core - sequencer tasks (included by ap030_core.v)
+// AP68020 core - sequencer tasks (included by ap020_core.v)
 //
 // All tasks are called from the clocked sequencer block and use
 // nonblocking assignments; the pipe commands (pop_n, flush_req) are
@@ -45,6 +45,17 @@ task ea_ready;
   end else state <= ea_ret;
  end
 endtask
+
+// MOVEC to CACR (MC68020 UM 7.3): E and F are stored; C clears the
+// instruction cache and the data cache (DATA_CACHE), CE one instruction
+// cache entry (CAAR)
+task cacr_write; input [31:0] val;
+	begin
+		cacr_q   <= val & `CACR020_RDMASK;
+		cacr_ci  <= val[`CACR_CI]; cacr_cei <= val[`CACR_CEI];
+		cacr_cd  <= DATA_CACHE ? val[`CACR_CI] : 1'b0;
+		cacr_ced <= 1'b0;
+	end endtask
 
 // convenience wrappers
 task rd;   input [31:0] addr; input [1:0] size; input [3:0] dst_sel; input [7:0] ret;

@@ -1,4 +1,4 @@
-project_open ap68030
+project_open ap68020
 create_timing_netlist -model slow
 read_sdc
 update_timing_netlist

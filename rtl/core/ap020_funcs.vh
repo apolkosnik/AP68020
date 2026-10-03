@@ -1,4 +1,4 @@
-// AP68030 core - helper functions (included by ap030_core.v at module level)
+// AP68020 core - helper functions (included by ap020_core.v at module level)
 
 // rotates for register bit fields
 function [31:0] rotl32; input [31:0] v; input [4:0] n;

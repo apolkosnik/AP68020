@@ -1,5 +1,5 @@
-; AP68030 coprocessor interface self test (UM Section 10)
-; assembled with vasmm68k_mot -Fbin -m68030
+; AP68020 coprocessor interface self test (UM Section 10)
+; assembled with vasmm68k_mot -Fbin -m68020 -m68851
 ;
 ; The testbench answers CPU space type 2 accesses for CpID 1 with a scripted
 ; coprocessor (tb_cp_model.svh): the command word selects the sequence of

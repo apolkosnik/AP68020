@@ -1,7 +1,7 @@
 //--------------------------------------------------------------------------//
-// AP68030 - MC68030 compatible CPU                                         //
+// AP68020 - MC68020 compatible CPU                                         //
 //                                                                          //
-// ap030_alu.v - integer ALU: arithmetic, logic, BCD, shifts/rotates with a  //
+// ap020_alu.v - integer ALU: arithmetic, logic, BCD, shifts/rotates with a  //
 // single-cycle barrel, bit operations; MC68020/MC68030 CCR semantics       //
 //                                                                          //
 // Conventions:                                                             //
@@ -16,9 +16,9 @@
 // gencpu "a real 68030 clears V"; DIVx overflow leaves N set, Z clear).    //
 //--------------------------------------------------------------------------//
 
-`include "ap030_defs.svh"
+`include "ap020_defs.svh"
 
-module ap030_alu
+module ap020_alu
 (
 	input             clk,
 	input       [5:0] op,

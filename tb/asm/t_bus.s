@@ -1,11 +1,11 @@
-; AP68030 dynamic bus sizing and misalignment self test
-; assembled with vasmm68k_mot -Fbin -m68030
+; AP68020 dynamic bus sizing and misalignment self test
+; assembled with vasmm68k_mot -Fbin -m68020 -m68851
 ;
 ; The testbench maps the same RAM at four windows with different ports:
-;   $000000  32-bit synchronous, burst
+;   $000000  32-bit asynchronous (the MC68020 bus has no synchronous cycles)
 ;   $200000  16-bit asynchronous
 ;   $300000  8-bit asynchronous
-;   $400000  32-bit asynchronous, CIIN asserted (never cached)
+;   $400000  32-bit asynchronous
 ; Every test writes through one window and reads back through another, so
 ; both the write lanes (UM Table 7-5) and the read assembly (UM Table 7-4)
 ; of the port pairs are checked.  Addresses are not reused between tests
@@ -43,7 +43,11 @@ ok\@:
 
 	org	$400
 start:
-	move.l	#$00003111,d0	; caches on, burst on, write allocate
+	; caches off: the windows alias one RAM, and the data cache (when built,
+	; for native-port memory) is invisible and not told about writes made
+	; through the other windows -- a real MC68020 has no data cache to go
+	; stale.  The caches are tested by t_m020.
+	moveq	#0,d0
 	movec	d0,cacr
 
 ;---------------------------------------------------------------- longs, every

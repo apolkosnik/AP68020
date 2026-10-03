@@ -1,27 +1,37 @@
 //--------------------------------------------------------------------------//
-// AP68030 - MC68030 compatible CPU                                         //
+// AP68020 - MC68020 compatible CPU                                         //
 //                                                                          //
-// ap030_top.v - the processor with the MC68030 pin set (UM Section 5)     //
+// ap020_top.v - the processor with the MC68020 pin set (MC68020 UM       //
+// Section 5): asynchronous bus cycles with dynamic bus sizing; no MMU,     //
+// no STERM/burst/CIIN/CIOUT/MMUDIS/STATUS/REFILL (MC68030 only).  An      //
+// optional native port serves RAM with line bursts (FAST_PORT).           //
 //                                                                          //
 // Bidirectional and three-state pins are presented as separate input,      //
 // output and enable signals so the module can be used in simulation and    //
 // wrapped for an FPGA's tristate buffers:                                  //
 //   D31-D0    d_i / d_o / d_oe                                              //
-//   A, FC, SIZ, R/W, RMC, AS, DS, DBEN, CIOUT, CBREQ   driven when bus_oe   //
+//   A, FC, SIZ, R/W, RMC, AS, DS, DBEN                 driven when bus_oe   //
 //   RESET     reset_n_i (input) / reset_n_oe (drive low: RESET instruction) //
 // Active-low pins carry the _n suffix.                                     //
 //--------------------------------------------------------------------------//
 
-`include "ap030_defs.svh"
+`include "ap020_defs.svh"
 
-module ap030_top
+module ap020_top
 #(
 	// PC-relative operand reads use program space (UM 2.4, 4.2).  An
 	// integration whose glue reads "program space" as "instruction fetch"
 	// (a TG68-style busstate, as Minimig's cpu_wrapper) sets this to 0 so
 	// those reads keep the data function code there.
 	parameter PCREL_PROGRAM_SPACE = 1,
-	parameter FAST_PORT = 0
+	parameter FAST_PORT = 0,
+	// The data cache (256 bytes, as the MC68030's) is not part of the
+	// MC68020: with DATA_CACHE = 1 it serves data read through the native
+	// port (FAST_PORT, memory the integration declares as RAM) and is
+	// invisible to software -- CACR's E enables it with the instruction
+	// cache and C clears it.  Data on the 68020 pin bus is never cached,
+	// as the 68020 has no cache inhibit input for I/O.
+	parameter DATA_CACHE = 1
 )
 (
 	input             clk,
@@ -37,20 +47,15 @@ module ap030_top
 	output            dben_n,
 	output            ecs_n,
 	output            ocs_n,
-	output            ciout_n,
-	output            cbreq_n,
 	output            bus_oe,
 	output     [31:0] d_o,
 	output            d_oe,
 	input      [31:0] d_i,
 	input             dsack0_n,
 	input             dsack1_n,
-	input             sterm_n,
 	input             berr_n,
 	input             halt_n,
 	input             avec_n,
-	input             ciin_n,
-	input             cback_n,
 	input             br_n,
 	output            bg_n,
 	input             bgack_n,
@@ -62,9 +67,6 @@ module ap030_top
 	output            reset_n_oe,
 	// emulator support
 	input             cdis_n,
-	input             mmudis_n,
-	output            refill_n,
-	output            status_n,
 
 	// Optional internal Fast RAM port, after translation. Request fields
 	// remain stable through fast_req && fast_ready. Responses have no
@@ -94,9 +96,9 @@ module ap030_top
 	output     [31:0] dbg_vbr,
 	output     [31:0] dbg_cacr,
 	output            dbg_cache_clear,  // pulse: CACR written with CD, CED, CI or CEI set
-	// system options (tie to 0 for a plain MC68030):
+	// system options (tie to 0 for a plain MC68020):
 	//  snoop_we/snoop_addr: another bus master wrote this address; the data
-	//    cache entry for it is invalidated (the MC68030 has no snooping --
+	//    cache entry for it is invalidated (the MC68020 has no snooping --
 	//    this is glue for systems whose DMA writes cachable-by-allocation RAM)
 	//  nmi_vec_nocache: the level 7 autovector fetch bypasses the data cache
 	input             snoop_we,
@@ -124,8 +126,8 @@ initial begin rst_sync = 2'b11; rst_cnt = 4'd15; rst = 1'b1; end
 assign reset_n_oe = reset_drive;
 
 // synchronized emulator inputs
-reg cdis_s, mmudis_s;
-always @(posedge clk) begin cdis_s <= ~cdis_n; mmudis_s <= ~mmudis_n; end
+reg cdis_s;
+always @(posedge clk) cdis_s <= ~cdis_n;
 
 //---------------------------------------------------------------------------
 // core <-> memory subsystem
@@ -142,11 +144,7 @@ wire        f_rw, f_rm;
 wire        i_stb, i_ack, i_fault, i_ready;
 wire [31:0] i_addr, i_data;
 wire  [2:0] i_fc;
-wire        op_req, op_done, reg_we, reg_fd, cfg_err, bus_quiet;
-wire  [2:0] op_kind, op_level, op_fc, op_fcmask, reg_sel;
-wire [31:0] op_la, op_desc_addr, reg_wdata_hi, reg_wdata_lo;
-wire [31:0] tc, srp_hi, srp_lo, crp_hi, crp_lo, tt0, tt1;
-wire [15:0] mmusr;
+wire        bus_quiet;
 wire [31:0] cacr;
 wire        cacr_ci, cacr_cei, cacr_cd, cacr_ced;
 assign dbg_cacr = cacr;
@@ -154,7 +152,7 @@ assign dbg_cache_clear = cacr_ci | cacr_cd | cacr_cei | cacr_ced;
 wire  [7:2] caar_idx;
 wire        halted;
 
-ap030_core #(.PCREL_PROGRAM_SPACE(PCREL_PROGRAM_SPACE)) core (
+ap020_core #(.PCREL_PROGRAM_SPACE(PCREL_PROGRAM_SPACE), .DATA_CACHE(DATA_CACHE)) core (
 	.clk(clk), .rst(rst),
 	.d_stb(d_stb), .d_addr(d_addr), .d_size(d_size), .d_rw(d_rw), .d_rmc(d_rmc), .d_rmc_last(d_rmc_last),
 	.d_rmc_release(d_rmc_release), .d_iack(d_iack), .d_nocache(d_nocache), .d_fc(d_fc), .d_wdata(d_wdata),
@@ -163,23 +161,19 @@ ap030_core #(.PCREL_PROGRAM_SPACE(PCREL_PROGRAM_SPACE)) core (
 	.f_addr(f_addr), .f_fc(f_fc), .f_size(f_size), .f_rw(f_rw), .f_rm(f_rm), .f_dob(f_dob),
 	.f_got(f_got), .f_partial(f_partial),
 	.i_stb(i_stb), .i_addr(i_addr), .i_fc(i_fc), .i_ready(i_ready), .i_ack(i_ack), .i_data(i_data), .i_fault(i_fault),
-	.op_req(op_req), .op_kind(op_kind), .op_level(op_level), .op_la(op_la), .op_fc(op_fc), .op_fcmask(op_fcmask),
-	.op_done(op_done), .op_desc_addr(op_desc_addr),
-	.reg_we(reg_we), .reg_sel(reg_sel), .reg_wdata_hi(reg_wdata_hi), .reg_wdata_lo(reg_wdata_lo), .reg_fd(reg_fd),
-	.cfg_err(cfg_err), .tc(tc), .srp_hi(srp_hi), .srp_lo(srp_lo), .crp_hi(crp_hi), .crp_lo(crp_lo),
-	.tt0(tt0), .tt1(tt1), .mmusr(mmusr), .bus_quiet(bus_quiet),
+	.bus_quiet(bus_quiet),
 	.cacr(cacr), .cacr_ci(cacr_ci), .cacr_cei(cacr_cei), .cacr_cd(cacr_cd), .cacr_ced(cacr_ced), .caar_idx(caar_idx),
-	.ipl_n(ipl_n), .ipend_n(ipend_n), .reset_drive(reset_drive), .status_n(status_n), .refill_n(refill_n),
+	.ipl_n(ipl_n), .ipend_n(ipend_n), .reset_drive(reset_drive), .status_n(), .refill_n(),
 	.halted(halted), .dbg_pc(dbg_pc), .dbg_sr(dbg_sr), .dbg_state(dbg_state), .dbg_inst(dbg_inst),
 	.dbg_vbr(dbg_vbr)
 ,
 	.nmi_vec_nocache(nmi_vec_nocache)
 );
 
-ap030_memsys #(.FAST_PORT(FAST_PORT)) memsys (
+ap020_memsys #(.FAST_PORT(FAST_PORT), .DATA_CACHE(DATA_CACHE)) memsys (
 	.clk(clk), .rst(rst),
 	.cacr(cacr), .cacr_ci(cacr_ci), .cacr_cei(cacr_cei), .cacr_cd(cacr_cd), .cacr_ced(cacr_ced),
-	.caar_idx(caar_idx), .cdis(cdis_s), .mmudis(mmudis_s), .halted(halted),
+	.caar_idx(caar_idx), .cdis(cdis_s), .halted(halted),
 	.d_stb(d_stb), .d_addr(d_addr), .d_size(d_size), .d_rw(d_rw), .d_rmc(d_rmc), .d_rmc_last(d_rmc_last),
 	.d_rmc_release(d_rmc_release), .d_iack(d_iack), .d_nocache(d_nocache), .snoop_we(snoop_we), .snoop_addr(snoop_addr), .d_fc(d_fc), .d_wdata(d_wdata),
 	.d_ack(d_ack), .d_rdata(d_rdata), .d_fault(d_fault), .d_avec(d_avec), .d_iack_berr(d_iack_berr),
@@ -187,16 +181,15 @@ ap030_memsys #(.FAST_PORT(FAST_PORT)) memsys (
 	.f_addr(f_addr), .f_fc(f_fc), .f_size(f_size), .f_rw(f_rw), .f_rm(f_rm), .f_dob(f_dob),
 	.f_got(f_got), .f_partial(f_partial),
 	.i_stb(i_stb), .i_addr(i_addr), .i_fc(i_fc), .i_ready(i_ready), .i_ack(i_ack), .i_data(i_data), .i_fault(i_fault),
-	.op_req(op_req), .op_kind(op_kind), .op_level(op_level), .op_la(op_la), .op_fc(op_fc), .op_fcmask(op_fcmask),
-	.op_done(op_done), .op_desc_addr(op_desc_addr),
-	.reg_we(reg_we), .reg_sel(reg_sel), .reg_wdata_hi(reg_wdata_hi), .reg_wdata_lo(reg_wdata_lo), .reg_fd(reg_fd),
-	.cfg_err(cfg_err), .tc(tc), .srp_hi(srp_hi), .srp_lo(srp_lo), .crp_hi(crp_hi), .crp_lo(crp_lo),
-	.tt0(tt0), .tt1(tt1), .mmusr(mmusr), .bus_quiet(bus_quiet),
+	.bus_quiet(bus_quiet),
 	.a_o(a), .fc_o(fc), .siz_o(siz), .rw_o(rw), .rmc_n_o(rmc_n), .as_n_o(as_n), .ds_n_o(ds_n), .dben_n_o(dben_n),
-	.ecs_n_o(ecs_n), .ocs_n_o(ocs_n), .ciout_n_o(ciout_n), .cbreq_n_o(cbreq_n), .bus_oe(bus_oe),
+	.ecs_n_o(ecs_n), .ocs_n_o(ocs_n), .ciout_n_o(), .cbreq_n_o(), .bus_oe(bus_oe),
 	.d_o(d_o), .d_oe(d_oe), .d_i(d_i),
-	.dsack0_n(dsack0_n), .dsack1_n(dsack1_n), .sterm_n(sterm_n), .berr_n(berr_n), .halt_n(halt_n),
-	.avec_n(avec_n), .ciin_n(ciin_n), .cback_n(cback_n), .br_n(br_n), .bgack_n(bgack_n),
+	// the MC68020 bus: asynchronous cycles only (no STERM, no bursts), and
+	// no cache inhibit input: program fetches are cachable, pin-bus data
+	// is never cached (ap020_memsys)
+	.dsack0_n(dsack0_n), .dsack1_n(dsack1_n), .sterm_n(1'b1), .berr_n(berr_n), .halt_n(halt_n),
+	.avec_n(avec_n), .ciin_n(1'b1), .cback_n(1'b1), .br_n(br_n), .bgack_n(bgack_n),
 	.bg_n_o(bg_n), .bus_granted(),
 	.fast_req(fast_req), .fast_addr(fast_addr), .fast_fc(fast_fc), .fast_rw(fast_rw),
 	.fast_ci(fast_ci), .fast_burst(fast_burst), .fast_be(fast_be), .fast_wdata(fast_wdata),

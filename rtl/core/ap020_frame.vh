@@ -1,4 +1,4 @@
-// AP68030 core - exception stack frame words (UM 8.4, included by ap030_core.v)
+// AP68020 core - exception stack frame words (UM 8.4, included by ap020_core.v)
 //
 // frame_word(i) is word i (offset 2*i) of the frame being built.  Formats:
 //   $0/$1  4 words   SR, PC, format/vector

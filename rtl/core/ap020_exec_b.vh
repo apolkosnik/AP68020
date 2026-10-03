@@ -1,4 +1,4 @@
-// AP68030 core - states part B: exceptions, RTE, MOVEM, MUL/DIV, CHK2/CMP2,
+// AP68020 core - states part B: exceptions, RTE, MOVEM, MUL/DIV, CHK2/CMP2,
 // CAS/CAS2, bit fields
 
 //-------------------------------------------------------------- exception processing (UM 8.1)

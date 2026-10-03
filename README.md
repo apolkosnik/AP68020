@@ -1,39 +1,93 @@
-# AP68030
+# AP68020
 
-A synthesisable MC68030 in Verilog: the complete 68020/030 integer
-instruction set, the on-chip instruction and data caches, the paged memory
-management unit, the coprocessor interface and the MC68030 bus with its
-timing, all validated against the *MC68030 User's Manual* (MC68030UM) and
-the *M68000 Family Programmer's Reference Manual* with Verilator.
+A synthesisable MC68020 in Verilog: the complete 68020 integer instruction
+set, the instruction cache, the coprocessor interface and the MC68020 bus,
+validated with Verilator against the *MC68020 User's Manual*, the *M68000
+Family Programmer's Reference Manual* and the WinUAE cputest corpus.
 
-The design targets 50 MHz in a Cyclone V and behaves like the real part at
-the pins: half-clock bus states S0-S5, asynchronous (DSACKx, 8/16/32-bit
-dynamic bus sizing) and synchronous (STERM) cycles, burst fills with
-CBREQ/CBACK, ECS/OCS, DBEN, RMC, CIOUT/CIIN, BERR/HALT retry and rerun,
-bus arbitration, interrupt, breakpoint and coprocessor acknowledge cycles
-in CPU space, and the RESET instruction driving the RESET pin for 512
-clocks.
+AP68020 is derived from [AP68030](https://github.com/apolkosnik/AP68030)
+and fixed as an MC68020:
+
+- **no MMU**: PMOVE, PTEST, PLOAD and PFLUSH are coprocessor-ID-0
+  instructions (an MC68851 on a real system); with no coprocessor
+  answering they take the Line F exception;
+- **the MC68020's CACR**: E (enable), F (freeze), C (clear) and CE (clear
+  entry, with CAAR); the MC68030's data cache, burst and write-allocate
+  bits do not exist, so software (Kickstart, for one) identifies an
+  MC68020;
+- **the MC68020 bus**: asynchronous cycles with DSACKx and 8/16/32-bit
+  dynamic bus sizing, half-clock bus states S0-S5, ECS/OCS, DBEN, RMC,
+  BERR/HALT retry and rerun, bus arbitration, interrupt, breakpoint and
+  coprocessor acknowledge cycles in CPU space, and the RESET instruction
+  driving the RESET pin for 512 clocks. There is no STERM, burst, CIIN,
+  CIOUT, MMUDIS, STATUS or REFILL.
+
+Two options go beyond the MC68020, for integrations that want speed:
+
+- `FAST_PORT=1`: a native request/response port with line bursts, which an
+  integration uses for its internal RAM instead of the pin bus;
+- `DATA_CACHE=1` (the default): a 256-byte data cache for memory read
+  through the native port. It is invisible to software: CACR's E enables
+  it with the instruction cache, C clears it. Pin-bus data is never
+  cached. Memory changed behind the processor must be cleared with C or
+  reported through the snoop inputs.
+
+## Integration
+
+`ap020_top` presents the bidirectional pins as separate input, output and
+enable signals (`d_i`/`d_o`/`d_oe`, `bus_oe` for the address and strobes,
+`reset_n_i`/`reset_n_oe`), so it simulates as is and wraps onto an FPGA's
+tristate buffers.
+
+| parameter | default | |
+|---|---|---|
+| `FAST_PORT` | 0 | enable the native RAM port |
+| `DATA_CACHE` | 1 | the data cache on native-port reads |
+| `PCREL_PROGRAM_SPACE` | 1 | PC-relative operand reads use program space; 0 keeps the data function code, for glue (TG68-style, as Minimig's) that treats program space as instruction fetch |
+
+`snoop_we`/`snoop_addr` invalidate the data cache entry for a write by
+another bus master, and `nmi_vec_nocache` makes the level 7 autovector
+fetch bypass the data cache; tie all three to 0 for a plain MC68020.
+
+### The native port
+
+With `FAST_PORT=1` the integration decodes `fast_addr` and `fast_fc` and
+asserts `fast_match` for its internal RAM. Ordinary instruction fetches and
+data transfers then use the port; RMW cycles (TAS, CAS, CAS2) and interrupt
+acknowledges stay on the pin bus.
+
+A request is accepted on a rising edge with `fast_req && fast_ready`; its
+fields stay stable until then. `fast_rw=1` reads; `fast_be[3]` selects
+`fast_wdata[31:24]`, the lowest-addressed byte. Responses begin at least
+one clock after acceptance with `fast_valid` and an aligned 32-bit
+`fast_rdata`. The first response completes the operand; `fast_word` names
+its longword within the 16-byte line. A burst read (`fast_burst`) returns
+four longwords, requested one first, wrapping modulo four; `fast_last`
+releases the slot. A write takes one response. There is one transaction at
+a time, no response backpressure and no bus error: a target that can fault
+must use the pin bus. Reset must cancel or drain an outstanding transaction
+before the target accepts a new request.
 
 ## Layout
 
 ```
-rtl/ap030_top.v        pin-level top: 68030 signal set, reset synchroniser
-rtl/ap030_core.v       instruction unit: prefetch pipe, decoder, sequencer, exceptions
+rtl/ap020_top.v        pin-level top: MC68020 signal set, reset synchroniser, options
+rtl/ap020_core.v       instruction unit: prefetch pipe, decoder, sequencer, exceptions
 rtl/core/*.vh          sequencer states (exec_a/b/c), decoder, frame layout, tasks
-rtl/ap030_memsys.v     data/instruction units: cache lookup, translation, write buffer,
-                       bus arbitration between walker, writes, data and prefetch
-rtl/ap030_cache.v      256-byte direct mapped cache (16 lines x 4 entries), logical tags
-rtl/ap030_mmu.v        ATC (22 entries), TT0/TT1, table search engine, PTEST/PLOAD/PFLUSH
-rtl/ap030_bus.v        bus controller: S0-S5 states, sizing, bursts, retry, arbitration
-rtl/ap030_alu.v        ALU, barrel shifter, BCD
-rtl/ap030_muldiv.v     32x32 multiply, 64/32 divide
-rtl/ap030_regfile.v    D0-D7, A0-A6, USP/ISP/MSP
-rtl/ap030_defs.svh     constants
-tb/tb_ap030_bus.sv     pin-level bench of the bus controller with slave models
-tb/tb_ap030_program.sv program bench: 1 MB RAM behind several port types, test registers
+rtl/ap020_memsys.v     data/instruction units: cache lookup, write buffer, native port,
+                       bus arbitration between writes, data and prefetch
+rtl/ap020_cache.v      256-byte direct mapped cache (16 lines x 4 entries)
+rtl/ap020_bus.v        bus controller: S0-S5 states, sizing, retry, arbitration
+rtl/ap020_alu.v        ALU, barrel shifter, BCD
+rtl/ap020_muldiv.v     32x32 multiply, 64/32 divide
+rtl/ap020_regfile.v    D0-D7, A0-A6, USP/ISP/MSP
+rtl/ap020_defs.svh     constants
+tb/tb_ap020_bus.sv     pin-level bench of the bus controller with slave models
+tb/tb_ap020_program.sv program bench: 1 MB RAM behind several port types, test registers
 tb/tb_cp_model.svh     scripted coprocessor at CpID 1
 tb/asm/*.s             self-test programs (vasm syntax)
 tb/run_tests.sh        the regression
+tb/cputest/            the WinUAE cputest corpus replay
 syn/                   Quartus project for the timing check
 doc/ARCHITECTURE.md    how the core is built
 ```
@@ -41,162 +95,62 @@ doc/ARCHITECTURE.md    how the core is built
 ## Running the tests
 
 Requirements: Verilator 5.x, `vasmm68k_mot` (vasm with the Motorola syntax
-module), Python 3.
+module), Python 3; vbcc for Dhrystone.
 
 ```
 cd tb
-sh run_tests.sh            # everything: bus bench, every program, with and without wait states
-FAST_PORT=1 sh run_tests.sh /tmp/ap030-native-suite  # native RAM plus pin-bus fallbacks
-./run_prog.sh t_mmu +trace # one program, with the instruction trace (+bustrace, +ctrace, +rftrace, +itrace, +strace)
+sh run_tests.sh                            # the MC68020 pin bus
+FAST_PORT=1 sh run_tests.sh build_fast     # RAM through the native port, data cache on
+FAST_PORT=1 DATA_CACHE=0 sh run_tests.sh build_nodc
+./run_prog.sh t_m020 +trace                # one program, with the instruction trace
 ```
 
-Every passing program reports its clock count, instruction count and the
-resulting clocks per instruction; `+strace` prints the sequencer state and
-the memory unit's handshakes every clock for profiling.
-
 The programs report through memory-mapped test registers (documented at
-the top of `tb/tb_ap030_program.sv`) and print the source of a failing
-check.
+the top of `tb/tb_ap020_program.sv`) and print the source of a failing
+check. Every program also runs with two wait states on every port. A
+passing program reports its clock count, instruction count and clocks per
+instruction. Besides `+trace`, the bench takes `+bustrace` (bus and
+native-port cycles), `+ctrace`, `+itrace`, `+rftrace` (register file
+writes) and `+strace` (sequencer and memory unit state every clock, for
+profiling).
 
 | program        | covers                                                                       |
 |----------------|------------------------------------------------------------------------------|
 | `t_integer`    | the integer instruction set, addressing modes, condition codes, bit fields, CAS, MOVEM, MOVEP, BCD |
 | `t_exceptions` | traps and frames ($0/$1/$2/$9/$A/$B), illegal/A-line/F-line, CHK/CHK2, privilege, MOVEC/MOVES, trace T1/T0, interrupts (levels, autovector, vectored, spurious, level 7 edge), STOP, master stack and throwaway frames, RTE format errors, BKPT, bus error rerun and software completion on reads, posted writes and instruction fetches, address errors, RESET |
-| `t_bus`        | dynamic bus sizing through 32/16/8-bit ports, misaligned operands, line and page crossings, cache hits, MOVEP, TAS/CAS RMW cycles, CIIN, code from narrow ports |
-| `t_cache`      | CACR (enable, freeze, clear all/entry, write allocate, burst enable), write-through, the instruction cache and self-modifying code, hit/miss timing |
-| `t_mmu`        | MMU registers and configuration exceptions, two- and three-level trees, short and long descriptors, early termination, indirect descriptors, limits, U/M history updates, WP/supervisor faults with RTE rerun, page-crossing operands, instruction fetch faults, harmless prefetches into unmapped pages, PTEST (all levels, An result), PLOAD, PFLUSH variants, PMOVEFD, FCL, SRE, TT0 (FC, R/W, CI), MMUDIS, ATC replacement, cache inhibit |
+| `t_bus`        | dynamic bus sizing through 32/16/8-bit ports, misaligned operands, line crossings, MOVEP, TAS/CAS RMW cycles, code from narrow ports |
+| `t_m020`       | the MC68020 specifics: CACR bits, MMU instructions taking Line F (supervisor and user mode), the data cache option, the instruction cache with C and CE/CAAR |
 | `t_cp`         | the coprocessor protocol: every response primitive, cpGEN with all EA forms, cpBcc/cpDBcc/cpScc/cpTRAPcc, cpSAVE/cpRESTORE, busy, exceptions requested by the coprocessor |
 | `t_dblfault`   | a bus error while stacking a bus error frame halts the processor |
 
+`tb/cputest/run_cputest.py` replays a WinUAE cputest corpus (68020 or
+68030 integer groups; see the script's header) on the processor.
+
 ## Timing and performance
 
-The standalone FPGA figures below are historical measurements, before the
-current throughput and optional native-port changes. Current full Minimig
-fits are reported under the native-port results below. The updated RTL has
-not been validated on a board.
-
-`syn/run_syn.sh` runs Quartus Prime (Cyclone V 5CSEBA6U23I7, 50 MHz
+`syn/run_syn.sh` runs Quartus Prime 17.0 (Cyclone V 5CSEBA6U23I7, 50 MHz
 constraint, ports as virtual pins with a 2 ns budget) and prints the Fmax
-summary. Quartus Prime 17.0 reports Fmax 53.0 MHz (slow 1100 mV 100 C
-corner, slack +0.57 ns at 50 MHz), 17.0k ALMs and 9.5k registers.
-
-Run Quartus outside the execution sandbox. Here, sandboxed invocations
-report expired-evaluation error 292037, while the same installation runs
-successfully outside the sandbox. Use an isolated source snapshot for a
-build so concurrent RTL edits cannot change its inputs.
-
-Dhrystone 2.1 (`tb/c`, compiled with vbcc `-O2 -speed -cpu=68030`, caches
-on, 2000 runs, checked against its final values) now runs in 2423 clocks
-per Dhrystone on the synchronous burst port: **11.74 DMIPS at 50 MHz**.
-With two wait states it takes 2802 clocks, **10.16 DMIPS**. These are
-simulation results normalized to 50 MHz. `run_tests.sh` builds and runs it
-when vbcc is installed (`VBCC=/opt/amiga-cc/vbcc` by default).
+summary. AP68020 reaches 51.8 MHz at the slow 1100 mV 100 C corner, with
++0.59 ns worst-case setup slack at 50 MHz across the four corners.
 
 | FPGA resource (Cyclone V) | used |
 |---|---|
-| ALMs | 17,041 (41 %) |
-| registers | 9,548 |
-| block RAM | 5 M10K, 4,096 bits |
+| ALMs | 14,230 (34 %) |
+| registers | 6,844 |
+| block RAM | 2 M10K, 4,096 bits |
 | DSP blocks | 4 |
 
-On the self-test programs (cache hits, synchronous memory, no wait states)
-the core runs at 5.5 clocks per instruction on the integer suite and 6.1
-to 6.6 on the exception and MMU suites, which are dominated by long
-instructions (absolute long operands, MOVEM, exception frames, table
-searches); instruction cache hits stream at one longword per clock, a data
-cache hit takes two clocks and consecutive stores run four clocks apart.
+Dhrystone 2.1 (`tb/c`, vbcc `-O2 -speed -cpu=68020`, caches on, 2000
+runs, checked against its final values), simulated and normalised to
+50 MHz:
 
-## Optional native Fast RAM port
-
-`ap030_top` defaults to `FAST_PORT=0`, retaining the pin-bus interface.
-With `FAST_PORT=1`, an integration can decode the translated `fast_addr`
-and `fast_fc`, then assert `fast_match` for reliable internal RAM.
-The memory system keeps locked RMW transfers, MMU table searches and
-interrupt acknowledgements on the pin bus. Translation and protection
-checks precede either route. Instruction fetches and ordinary data accesses
-can use the native port.
-
-The request is accepted on a rising edge with `fast_req && fast_ready`;
-fields remain stable until acceptance. `fast_rw=1` reads. `fast_be[3]`
-selects `fast_wdata[31:24]`, the lowest-address byte of the aligned word.
-Responses start at least one clock after acceptance, with `fast_valid`
-and an aligned 32-bit `fast_rdata`. The first response completes the operand;
-`fast_word` identifies its word within the 16-byte line. A burst returns
-four words, requested word first, wrapping modulo four; `fast_last` releases
-the slot. Writes require one completion response. There is one transaction
-at a time and no response backpressure or bus-error response. Targets that
-can fault must use the pin route. Reset must cancel or drain the target's
-outstanding transaction before accepting a new request.
-
-The prepared Minimig integration enables this port and shares the existing
-8 KiB cache, line buffers, posted-write queue and DDR clock crossings between
-native and pin traffic. CPU-space accesses and the special NMI-vector path
-retain the pin route. Cache-inhibited accesses, clears, byte writes and
-cross-port coherence follow the existing cache rules. The implementation
-also prevents an interrupted fill from surviving a concurrent cache clear.
-
-The same 500-run Fast RAM Dhrystone image produced these simulated results:
-
-| Integration variant | CPU cycles | DMIPS normalized to 50 MHz |
+| configuration | clocks per Dhrystone | DMIPS |
 |---|---:|---:|
-| Committed 8 KiB cache (`04af1491`) | 1,470,205 | 9.68 |
-| EA/MOVE/branch throughput changes | 1,360,257 | 10.46 |
-| Throughput changes plus native port | 1,170,812 | 12.15 |
-| Native port, slower DDR and stalls | 1,172,264 | 12.14 |
-| Native port on original core, without throughput changes | 1,307,759 | 10.88 |
+| MC68020 pin bus, no wait states | 4549 | 6.26 |
+| native port, data cache | 2496 | 11.40 |
+| native port, no data cache | 4263 | 6.68 |
 
-The native port adds **16.2%** over the throughput changes; together they
-add **25.6%** over the committed cached integration. The integrated bench
-uses a 20.6 ns CPU period and reports normalized 50 MHz results. These are
-not board measurements.
-
-Quartus Prime 17.0.2 full-project fits, Cyclone V 5CSEBA6U23I7, original
-timing constraints:
-
-| Integration variant | ALMs | RAM blocks | CPU Fmax, slow 100 C | CPU setup slack at 50 MHz |
-|---|---:|---:|---:|---:|
-| Previous board report (2026-10-01 21:29) | 37,072 | 287 | 50.27 MHz | +0.053 ns |
-| Selected combined version, seed 8 | 38,203 | 287 | 50.55 MHz | +0.108 ns |
-| Corrected combined version, seed 7 | 38,221 | 287 | 50.48 MHz | +0.191 ns |
-| Native port on original core, seed 7 | 37,343 | 287 | 50.41 MHz | +0.081 ns |
-
-The previous board report is a reference measurement, not a fresh baseline
-rebuild. The initial combined fit failed CPU timing (42.27 MHz). Selecting
-the MMU port before resolving late bus stalls and separating the pin-path
-cache-hit comparison shortened those critical paths without changing the
-Dhrystone cycle count. The selected seed-8 build passes project-wide setup,
-hold, recovery, removal and pulse-width checks at all four available corners.
-It costs 1,131 more ALMs than the prior board report (3.1%); this change
-improves speed rather than reducing area. Its tightest project-wide setup
-margin is +0.012 ns in the HDMI scaler at the slow -40 C corner. CPU timing
-passes at 50 MHz; this is not an overclocking result.
-
-Neither seed-7 fit meets timing for the full project: the corrected combined
-build has a -0.099 ns setup path from the shared DDR arbiter into the HPS
-SDRAM interface. The original-core variant has -0.277 ns DDR and -0.015 ns
-HDMI setup failures at the default corner; its CPU also misses timing at the
-slow -40 C corner (-0.011 ns, 49.95 MHz Fmax). Seed 8 uses identical RTL and
-SDC to the corrected combined seed-7 version; no timing exceptions were
-added. The selected build is ready for board testing, but has not been
-programmed onto a board.
-
-Validation includes 58 integration runs; 18 standalone runs with the native
-port disabled and 18 enabled; frontend tests with mixed native/pin traffic,
-partial writes, FIFO pressure, wrapped fills and clear/reset races; and
-28,987 selected WinUAE rounds across 51 slices with zero mismatches. The
-native corpus mode routes ordinary data through the direct port and leaves
-instruction fetches on pins for the replay harness's observation points.
-Use `tb/cputest/run_cputest.py --native` with a separate work directory to
-repeat that mode. This is a targeted corpus subset, not a complete corpus run.
-
-The [board patch](doc/minimig-native.patch) includes placement seed 8 and
-targets integration commit `04af149119925f1a33dbe9807cf131a120f07b68`.
-[Validation records](doc/native-port-results.json) include the selected
-build, comparison fits and artifact hashes. The fitted image is
-`/tmp/ap030-native/quartus-timing-seed8/output_files/Minimig.rbf`; exact source
-hashes and timing reports are in that build directory. Applying the patch
-to the board-build worktree is pending confirmation that no Quartus compile
-is using that tree. All builds here used isolated source snapshots.
+These are simulation results; AP68020 has not been run on a board.
 
 ## Licence
 

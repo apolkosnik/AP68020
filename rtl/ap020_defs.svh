@@ -1,15 +1,15 @@
 //--------------------------------------------------------------------------//
-// AP68030 - MC68030 compatible CPU                                         //
+// AP68020 - MC68020 compatible CPU                                         //
 //                                                                          //
-// ap030_defs.svh - constants shared by every module                        //
+// ap020_defs.svh - constants shared by every module                        //
 //                                                                          //
 // References are to the MC68030 User's Manual (MC68030UM/AD rev 3) unless  //
 // noted: "UM 7.2.1" is section 7.2.1, "PRM" is the M68000 Programmer's     //
 // Reference Manual.                                                        //
 //--------------------------------------------------------------------------//
 
-`ifndef AP030_DEFS_SVH
-`define AP030_DEFS_SVH
+`ifndef AP020_DEFS_SVH
+`define AP020_DEFS_SVH
 
 // Function codes (UM Table 4-1)
 `define FC_USER_DATA   3'd1
@@ -90,6 +90,9 @@
 `define CACR_WA   13
 `define CACR_MASK 32'h0000_3F1F   // bits that are stored (CD/CED/CI/CEI read as zero)
 `define CACR_RDMASK 32'h0000_3313
+// MC68020 mode: CACR holds E (bit 0) and F (bit 1); CE (2) and C (3) are
+// write-only commands; nothing else exists (MC68020 UM 7.3)
+`define CACR020_RDMASK 32'h0000_0003
 
 // MMU status register (UM Figure 9-38)
 `define MMUSR_B   15
@@ -147,4 +150,4 @@
 `define BK_IACK  2'd1   // interrupt acknowledge (AVEC honoured, vector on low port byte)
 `define BK_TABLE 2'd2   // MMU table search (RMC asserted by the requester)
 
-`endif // AP030_DEFS_SVH
+`endif // AP020_DEFS_SVH

@@ -16,7 +16,7 @@
  */
 
 /*
- * AP68030 bare-metal harness.  The benchmark body below is the published
+ * AP68020 bare-metal harness.  The benchmark body below is the published
  * Dhrystone 2.1 text; only the operating system services are replaced:
  *   - output goes to the testbench console register (one byte per write)
  *   - the two records come from static storage instead of malloc

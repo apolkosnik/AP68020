@@ -1,5 +1,5 @@
 //--------------------------------------------------------------------------//
-// AP68030 - tb_ap030_bus.sv                                                //
+// AP68020 - tb_ap020_bus.sv                                                //
 //                                                                          //
 // Pin-level check of the bus controller against slave models written from  //
 // the MC68030 User's Manual, independently of the controller:              //
@@ -15,9 +15,9 @@
 //--------------------------------------------------------------------------//
 
 `timescale 1ns/1ps
-`include "ap030_defs.svh"
+`include "ap020_defs.svh"
 
-module tb_ap030_bus;
+module tb_ap020_bus;
 
 reg clk = 0;
 always #10 clk = ~clk;      // 50 MHz
@@ -47,7 +47,7 @@ reg  [31:0] d_i;
 reg         dsack0_n = 1, dsack1_n = 1, sterm_n = 1, berr_n = 1, halt_n = 1, avec_n = 1;
 reg         ciin_n = 1, cback_n = 1, br_n = 1, bgack_n = 1;
 
-ap030_bus dut (
+ap020_bus dut (
 	.clk(clk), .rst(rst),
 	.req(req), .req_kind(req_kind), .req_addr(req_addr), .req_nbytes(req_nbytes),
 	.req_total(req_total), .req_rw(req_rw), .req_fc(req_fc), .req_rmc(req_rmc),

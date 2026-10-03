@@ -1,7 +1,7 @@
 //--------------------------------------------------------------------------//
-// AP68030 - MC68030 compatible CPU                                         //
+// AP68020 - MC68020 compatible CPU                                         //
 //                                                                          //
-// ap030_regfile.v - D0-D7, A0-A6 and the three stack pointers              //
+// ap020_regfile.v - D0-D7, A0-A6 and the three stack pointers              //
 //                                                                          //
 // Index 0..7 = D0..D7, 8..14 = A0..A6, 15 = A7 (USP/ISP/MSP by SR.S/SR.M). //
 // Three combinational read ports, one write port (full 32 bits; the core   //
@@ -9,7 +9,7 @@
 // MOVE USP / MOVEC and the exception logic.                                //
 //--------------------------------------------------------------------------//
 
-module ap030_regfile
+module ap020_regfile
 (
 	input             clk,
 	input             rst,

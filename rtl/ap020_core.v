@@ -1,11 +1,11 @@
 //--------------------------------------------------------------------------//
-// AP68030 - MC68030 compatible CPU                                         //
+// AP68020 - MC68020 compatible CPU                                         //
 //                                                                          //
-// ap030_core.v - execution unit: instruction pipe, decoder, sequencer,     //
+// ap020_core.v - execution unit: instruction pipe, decoder, sequencer,     //
 // exception processing, coprocessor interface, MMU instructions            //
 //                                                                          //
-// The sequencer is a state machine whose states are in core/ap030_states   //
-// .vh and whose bodies are in the core/ap030_*.vh includes.  Every data    //
+// The sequencer is a state machine whose states are in core/ap020_states   //
+// .vh and whose bodies are in the core/ap020_*.vh includes.  Every data    //
 // access goes through one wait state (S_DWAIT) with a recorded destination //
 // and return state, which is also what makes an instruction resumable      //
 // after a bus fault: the format $B frame carries the resume state and the  //
@@ -16,17 +16,18 @@
 // scan_pc and stage B = the word at scan_pc + 2 (UM 8.2).                  //
 //--------------------------------------------------------------------------//
 
-`include "ap030_defs.svh"
+`include "ap020_defs.svh"
 
-module ap030_core
+module ap020_core
 #(
-	parameter PCREL_PROGRAM_SPACE = 1   // see ap030_top
+	parameter PCREL_PROGRAM_SPACE = 1,  // see ap020_top
+	parameter DATA_CACHE = 1            // see ap020_top
 )
 (
 	input             clk,
 	input             rst,
 
-	// ---- data port (ap030_memsys) ---------------------------------------
+	// ---- data port (ap020_memsys) ---------------------------------------
 	output reg        d_stb,
 	output reg [31:0] d_addr,
 	output reg  [1:0] d_size,
@@ -35,7 +36,7 @@ module ap030_core
 	output reg        d_rmc_last,
 	output reg        d_rmc_release,
 	output reg        d_iack,
-	output reg        d_nocache,    // this read bypasses the data cache (system option, see ap030_top)
+	output reg        d_nocache,    // this read bypasses the data cache (system option, see ap020_top)
 	input             nmi_vec_nocache,
 	output reg  [2:0] d_fc,
 	output reg [31:0] d_wdata,
@@ -65,28 +66,10 @@ module ap030_core
 	input             i_fault,
 
 	// ---- MMU instructions and registers --------------------------------
-	output reg        op_req,
-	output reg  [2:0] op_kind,
-	output reg  [2:0] op_level,
-	output reg [31:0] op_la,
-	output reg  [2:0] op_fc,
-	output reg  [2:0] op_fcmask,
-	input             op_done,
-	input      [31:0] op_desc_addr,
-	output reg        reg_we,
-	output reg  [2:0] reg_sel,
-	output reg [31:0] reg_wdata_hi,
-	output reg [31:0] reg_wdata_lo,
-	output reg        reg_fd,
-	input             cfg_err,
-	input      [31:0] tc,
-	input      [31:0] srp_hi, srp_lo, crp_hi, crp_lo,
-	input      [31:0] tt0, tt1,
-	input      [15:0] mmusr,
 	input             bus_quiet,
 
 	// ---- cache control -----------------------------------------------------
-	output reg [31:0] cacr,
+	output     [31:0] cacr,
 	output reg        cacr_ci,
 	output reg        cacr_cei,
 	output reg        cacr_cd,
@@ -108,7 +91,7 @@ module ap030_core
 	output     [31:0] dbg_vbr       // VBR (system glue: NMI vector address)
 );
 
-`include "core/ap030_states.vh"
+`include "core/ap020_states.vh"
 
 //---------------------------------------------------------------------------
 // architectural state
@@ -118,6 +101,14 @@ reg [31:0] vbr;
 assign dbg_vbr = vbr;
 reg [31:0] caar;
 reg  [2:0] sfc, dfc;
+// CACR as MOVEC sees it (the MC68020's E and F), and as the caches use it:
+// E enables the instruction cache and, with DATA_CACHE, the data cache
+// (invisible to MOVEC, see ap020_top); F freezes the instruction cache.
+// Write allocation is never used.
+reg [31:0] cacr_q;
+assign cacr = (cacr_q[`CACR_EI] ? ((32'd1 << `CACR_EI) | (32'd1 << `CACR_IBE) |
+                                   (DATA_CACHE ? ((32'd1 << `CACR_ED) | (32'd1 << `CACR_DBE)) : 32'd0)) : 32'd0) |
+              (cacr_q[`CACR_FI] ? (32'd1 << `CACR_FI) : 32'd0);
 wire       sr_s = sr[`SR_S];
 wire       sr_m = sr[`SR_M];
 wire [2:0] fc_data = sr_s ? `FC_SUPER_DATA : `FC_USER_DATA;
@@ -140,7 +131,7 @@ reg   [1:0] sp_sel;
 reg  [31:0] sp_wdata;
 wire [31:0] usp_q, isp_q, msp_q;
 
-ap030_regfile rf (
+ap020_regfile rf (
 	.clk(clk), .rst(rst), .sr_s(sr_s), .sr_m(sr_m),
 	.we(rf_we), .waddr(rf_waddr), .wact(rf_wact), .wdata(rf_wdata),
 	.raddr_a(ra_a), .rdata_a(rf_a), .raddr_b(ra_b), .rdata_b(rf_b), .raddr_c(ra_c), .rdata_c(rf_c),
@@ -157,17 +148,17 @@ reg   [1:0] alu_size;
 reg   [5:0] alu_cnt;
 reg  [31:0] alu_a, alu_b;
 wire [31:0] alu_r;
-// ALU operand selection per state (see ap030_exec.vh)
+// ALU operand selection per state (see ap020_exec.vh)
 `define ALU_SET(op_, sz_, a_, b_, cnt_) begin alu_op = op_; alu_size = sz_; alu_a = a_; alu_b = b_; alu_cnt = cnt_; end
 wire  [4:0] alu_f;
-ap030_alu alu (.clk(clk), .op(alu_op), .size(alu_size), .shcnt(alu_cnt), .a(alu_a), .b(alu_b),
+ap020_alu alu (.clk(clk), .op(alu_op), .size(alu_size), .shcnt(alu_cnt), .a(alu_a), .b(alu_b),
                .flags_in(sr[4:0]), .result(alu_r), .flags_out(alu_f));
 
 reg         md_start, md_div, md_sign;
 reg  [31:0] md_a, md_hi, md_lo;
 wire        md_done, md_ovf;
 wire [31:0] md_rhi, md_rlo;
-ap030_muldiv md (.clk(clk), .rst(rst), .start(md_start), .is_div(md_div), .sign_op(md_sign),
+ap020_muldiv md (.clk(clk), .rst(rst), .start(md_start), .is_div(md_div), .sign_op(md_sign),
                  .op_a(md_a), .op_hi(md_hi), .op_lo(md_lo), .done(md_done), .res_hi(md_rhi),
                  .res_lo(md_rlo), .ovf(md_ovf));
 
@@ -337,7 +328,7 @@ assign dbg_state = state;
 //---------------------------------------------------------------------------
 wire        at_dispatch = (state == S_FETCH) || (state == S_GEN_EXEC);
 wire [15:0] dw = at_dispatch ? w0 : ir;
-`include "core/ap030_decode.vh"
+`include "core/ap020_decode.vh"
 
 //---------------------------------------------------------------------------
 // helpers
@@ -506,10 +497,6 @@ always @* begin
 			ra_b = {1'b1, ir[2:0]};              // An direct or the address register of the EA
 			ra_c = {1'b0, ir[2:0]};              // Dn direct
 		end
-		S_PMMU0, S_PLOAD, S_PFLUSH2, S_PTEST, S_PTEST2, S_PFLUSH, S_PMOVE_RD, S_PMOVE_RD2, S_PMOVE_RD3, S_PMOVE_WR, S_PMOVE_WR2, S_PMOVE_FIN: begin
-			ra_a = {1'b0, ext[2:0]};          // Dn holding the function code
-			ra_b = {1'b1, ext[7:5]};          // An for the PTEST result
-		end
 		default: ;
 	endcase
 end
@@ -528,13 +515,13 @@ assign refill_n = refill_n_r;
 //---------------------------------------------------------------------------
 // exception frame word generator (UM 8.4)
 //---------------------------------------------------------------------------
-`include "core/ap030_frame.vh"
+`include "core/ap020_frame.vh"
 
 //---------------------------------------------------------------------------
 // tasks and helper functions
 //---------------------------------------------------------------------------
-`include "core/ap030_funcs.vh"
-`include "core/ap030_tasks.vh"
+`include "core/ap020_funcs.vh"
+`include "core/ap020_tasks.vh"
 
 // the dispatch reads the operands of the instruction being decoded
 assign ra_d = dc_sreg;
@@ -577,9 +564,7 @@ always @(posedge clk) begin
 	d_stb <= 1'b0;
 	d_rmc_release <= 1'b0;
 	i_stb <= 1'b0;
-	op_req <= 1'b0;
 	dbg_inst <= 1'b0;
-	reg_we <= 1'b0;
 	cacr_ci <= 1'b0; cacr_cei <= 1'b0; cacr_cd <= 1'b0; cacr_ced <= 1'b0;
 	md_start <= 1'b0;
 	irq_taken7 <= 1'b0;
@@ -591,7 +576,7 @@ always @(posedge clk) begin
 		state <= S_RESET0;
 		sr <= `SR_RESET;
 		vbr <= 32'd0;
-		cacr <= 32'd0;
+		cacr_q <= 32'd0;
 		caar <= 32'd0;
 		sfc <= 3'd0; dfc <= 3'd0;
 		pq_v <= 6'd0; pq_f <= 6'd0; pq_n <= 3'd0;
@@ -629,8 +614,6 @@ always @(posedge clk) begin
 		cp_id <= 3'd0; cp_resp <= 16'd0; cp_cond <= 1'b0; cp_len <= 8'd0; cp_pos <= 8'd0; cp_dr <= 1'b0;
 		cp_ca <= 1'b0; cp_pcbit <= 1'b0; cp_base <= 32'd0; cp_kind <= 4'd0;
 		md_div <= 1'b0; md_sign <= 1'b0; md_a <= 32'd0; md_hi <= 32'd0; md_lo <= 32'd0;
-		op_kind <= 3'd0; op_level <= 3'd0; op_la <= 32'd0; op_fc <= 3'd0; op_fcmask <= 3'd0;
-		reg_sel <= 3'd0; reg_wdata_hi <= 32'd0; reg_wdata_lo <= 32'd0; reg_fd <= 1'b0;
 		rf_waddr <= 4'd0; rf_wact <= 2'd1; rf_wdata <= 32'd0; sp_sel <= 2'd0; sp_wdata <= 32'd0;
 	end else begin
 		//---------------------------------------------------------- events from the memory system
@@ -643,7 +626,7 @@ always @(posedge clk) begin
 		ipend_r <= irq_pend && !exc_is_irq_active;
 
 		//---------------------------------------------------------- the states
-		`include "core/ap030_exec.vh"
+		`include "core/ap020_exec.vh"
 
 		//---------------------------------------------------------- double bus fault
 		// a frame write of a bus/address error exception failed on the bus

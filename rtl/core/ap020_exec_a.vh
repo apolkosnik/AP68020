@@ -1,4 +1,4 @@
-// AP68030 core - states part A: boundary, data wait, immediates, effective
+// AP68020 core - states part A: boundary, data wait, immediates, effective
 // addresses, the generic read-operate-write path, MOVE, program flow,
 // linkage, and the simpler special instructions
 
@@ -463,7 +463,7 @@ S_MOVEC: begin : movec_state
 	case (ext[11:0])
 		12'h000: v = {29'd0, sfc};
 		12'h001: v = {29'd0, dfc};
-		12'h002: v = cacr;
+		12'h002: v = cacr_q;
 		12'h800: v = usp_q;
 		12'h801: v = vbr;
 		12'h802: v = caar;
@@ -480,9 +480,7 @@ S_MOVEC: begin : movec_state
 			12'h000: sfc <= rf_a[2:0];
 			12'h001: dfc <= rf_a[2:0];
 			12'h002: begin
-				cacr <= rf_a & `CACR_RDMASK;
-				cacr_ci <= rf_a[`CACR_CI]; cacr_cei <= rf_a[`CACR_CEI];
-				cacr_cd <= rf_a[`CACR_CD]; cacr_ced <= rf_a[`CACR_CED];
+				cacr_write(rf_a);
 			end
 			12'h800: begin sp_we <= 1'b1; sp_sel <= 2'd0; sp_wdata <= rf_a; end
 			12'h801: vbr <= rf_a;

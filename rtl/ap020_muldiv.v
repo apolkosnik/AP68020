@@ -1,7 +1,7 @@
 //--------------------------------------------------------------------------//
-// AP68030 - MC68030 compatible CPU                                         //
+// AP68020 - MC68020 compatible CPU                                         //
 //                                                                          //
-// ap030_muldiv.v - multiply and divide unit                                //
+// ap020_muldiv.v - multiply and divide unit                                //
 //                                                                          //
 // MUL: 32x32 -> 64, signed or unsigned, one registered product             //
 // DIV: 64/32 -> 32-bit quotient and remainder, restoring, four bits per     //
@@ -12,7 +12,7 @@
 // the word forms.                                                          //
 //--------------------------------------------------------------------------//
 
-module ap030_muldiv
+module ap020_muldiv
 (
 	input             clk,
 	input             rst,

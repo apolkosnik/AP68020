@@ -1,5 +1,5 @@
-; AP68030 integer ISA self test (from the AP040 suite, adapted to the MC68030)
-; assembled with vasmm68k_mot -Fbin -m68030
+; AP68020 integer ISA self test (from the AP040 suite, adapted to the MC68030)
+; assembled with vasmm68k_mot -Fbin -m68020 -m68851
 ;
 ; protocol with the testbench:
 ;   word write to $F100 = failing test number

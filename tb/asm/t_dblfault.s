@@ -1,5 +1,5 @@
-; AP68030 double bus fault self test (UM 8.1.2, 7.5.4)
-; assembled with vasmm68k_mot -Fbin -m68030
+; AP68020 double bus fault self test (UM 8.1.2, 7.5.4)
+; assembled with vasmm68k_mot -Fbin -m68020 -m68851
 ;
 ; A bus error while the processor stacks a bus error frame halts it: the
 ; testbench runs this program with +expect_halt and passes when the HALT

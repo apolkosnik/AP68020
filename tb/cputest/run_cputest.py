@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Run the WinUAE cputest 68030 corpus (data format v20) against AP030 RTL.
+"""Run a WinUAE cputest corpus (68020 or 68030 integer groups) against AP020 RTL.
 
 The corpus is WinUAE's (cputest by Toni Wilen): for every instruction and
 addressing mode it records input state and the resulting registers, SR,
 memory writes and exception frames.  Each slice is expanded by replay_gen.py
 (from the AP040 harness) into APR2 records and replayed on the real
-ap030_top by tb_cputest.sv under Verilator.
+ap020_top by tb_cputest.sv under Verilator.
 
 Examples:
   ./run_cputest.py /home/adam/Downloads/data_030.zip                 # every integer group
@@ -32,14 +32,16 @@ sys.path.insert(0, str(HERE))
 from replay_gen import generate  # noqa: E402
 
 RTL = HERE.parent.parent / "rtl"
-SOURCES = ["ap030_top.v", "ap030_core.v", "ap030_memsys.v", "ap030_mmu.v", "ap030_cache.v",
-           "ap030_bus.v", "ap030_alu.v", "ap030_muldiv.v", "ap030_regfile.v"]
-# FPU groups need a 68881/68882 coprocessor, which the AP030 does not have
-# v20 zips name groups 68030_<name>; merged (.daz) sets name them 3_<name>
+SOURCES = ["ap020_top.v", "ap020_core.v", "ap020_memsys.v", "ap020_cache.v",
+           "ap020_bus.v", "ap020_alu.v", "ap020_muldiv.v", "ap020_regfile.v"]
+# FPU groups need a 68881/68882 coprocessor, which the AP020 does not have
+# v20 zips name groups 680x0_<name>; merged (.daz) sets name them 2_/3_<name>.
+# The 68030 corpus applies too: its integer groups do not involve the MMU
+# or the caches, where the two processors differ.
 INTEGER_GROUPS = ["AE", "Basic", "Default", "FFEXT_DST", "FFEXT_SRC", "IRQ", "JITLM",
                   "ODD_EXC", "ODD_IRQ", "ODD_STK",
                   "BASIC", "EXTDST", "EXTSRC", "ODDEXC", "ODDIRQ", "ODDSTK"]
-GROUP_RE = re.compile(r"^(?:68030|3)_(.+)$")
+GROUP_RE = re.compile(r"^(?:68020|68030|2|3)_(.+)$")
 MRG = b"\xafMRG"
 
 
@@ -74,7 +76,7 @@ def corpus_root(source: Path, work: Path) -> Path:
         if (source / sub).is_dir():
             source = source / sub
     if not any(GROUP_RE.match(p.name) for p in source.iterdir() if p.is_dir()):
-        raise SystemExit("no 68030_*/3_* groups below %s" % source)
+        raise SystemExit("no 68020_*/68030_*/2_*/3_* groups below %s" % source)
     return source
 
 

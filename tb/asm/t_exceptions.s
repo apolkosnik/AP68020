@@ -1,5 +1,5 @@
-; AP68030 exception processing self test
-; assembled with vasmm68k_mot -Fbin -m68030
+; AP68020 exception processing self test
+; assembled with vasmm68k_mot -Fbin -m68020 -m68851
 ;
 ; Covers UM Section 8: instruction traps and their frames (formats $0 and
 ; $2), privilege violation, illegal/A-line/F-line, trace T1 and T0,
@@ -68,6 +68,7 @@ chkl	macro
 	failt	\3
 ok\@:
 	endm
+
 
 ; record the frame at a6 (a register was saved below it)
 record2	macro
@@ -247,7 +248,7 @@ p1:	move.w	sr,d0		; privileged
 	failt	34
 p1ok:
 
-;---------------------------------------------------------------- MOVEC: the MC68030 control registers
+;---------------------------------------------------------------- MOVEC: the MC68020 control registers (SFC DFC CACR USP VBR CAAR MSP ISP)
 	moveq	#5,d0
 	movec	d0,sfc
 	moveq	#6,d0
@@ -259,11 +260,11 @@ p1ok:
 	move.l	#$3111,d0
 	movec	d0,cacr
 	movec	cacr,d1
-	chkl	d1,$3111,37
+	chkl	d1,$0001,37		; CACR keeps E and F only
 	move.l	#$3919,d0	; with CI and CD (clear) bits: they read as zero
 	movec	d0,cacr
 	movec	cacr,d1
-	chkl	d1,$3111,38
+	chkl	d1,$0001,38		; CACR keeps E and F only
 	move.l	#$12345670,d0
 	movec	d0,caar
 	movec	caar,d1
@@ -830,7 +831,7 @@ irs_done:
 	move.l	RSTLEN,d0
 	chkl	d0,512,105
 	movec	cacr,d1		; internal state untouched
-	chkl	d1,$3111,106
+	chkl	d1,$0001,106		; CACR keeps E and F only
 
 	move.w	#$600D,(DONEREG).l
 	stop	#$2700

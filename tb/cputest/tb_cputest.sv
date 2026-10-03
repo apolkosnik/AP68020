@@ -1,8 +1,8 @@
-// AP030 against the WinUAE cputest corpus (68030, data format v20).
+// AP020 against the WinUAE cputest corpus (68030, data format v20).
 //
 // Port of the AP040 replay driver (Minimig tests/ap040/tb_dat_replay.v) to
-// the AP030's MC68030 pin bus.  replay_gen.py expands one corpus slice into
-// APR2 records; each record runs on the real ap030_top.  No instruction
+// the AP020's MC68030 pin bus.  replay_gen.py expands one corpus slice into
+// APR2 records; each record runs on the real ap020_top.  No instruction
 // behaviour is modelled here.  Per round the bench:
 //   - resets the processor with the round's PC in the reset vector and
 //     holds its first opcode fetch while it injects the complete register
@@ -18,7 +18,8 @@
 //     the corpus.
 `timescale 1ns/1ns
 
-module tb_cputest #(parameter FAST_PORT = 0);
+module tb_cputest #(parameter FAST_PORT = 0,
+	parameter DATA_CACHE = 1);
 
 localparam [31:0] TMEM_MAX = 32'h0020_0000;
 reg [31:0] TBASE;
@@ -48,9 +49,9 @@ reg nreset = 0;
 wire [31:0] a, d_o;
 wire  [2:0] fc;
 wire  [1:0] siz;
-wire        rw, as_n, ds_n, d_oe, bus_oe, cbreq_n;
+wire        rw, as_n, ds_n, d_oe, bus_oe;
 reg  [31:0] d_i;
-reg         sterm_n, berr_n, avec_n, dsack0_n, dsack1_n;
+reg         berr_n, avec_n, dsack0_n, dsack1_n;
 reg   [2:0] ipl;               // active low
 wire [31:0] dbg_pc;
 
@@ -63,19 +64,19 @@ wire [3:0] n_be;
 reg n_valid = 0, n_last = 0;
 reg [1:0] n_word = 0;
 reg [31:0] n_rdata = 0;
-ap030_top #(.FAST_PORT(FAST_PORT)) dut (
+ap020_top #(.FAST_PORT(FAST_PORT), .DATA_CACHE(DATA_CACHE)) dut (
 	.clk(clk),
  .fast_req(n_req), .fast_ready(n_ready), .fast_match(n_match),
  .fast_addr(n_addr), .fast_fc(n_fc), .fast_rw(n_rw), .fast_ci(n_ci),
  .fast_burst(n_burst), .fast_be(n_be), .fast_wdata(n_wdata),
  .fast_valid(n_valid), .fast_last(n_last), .fast_word(n_word), .fast_rdata(n_rdata),
 	.a(a), .fc(fc), .siz(siz), .rw(rw), .rmc_n(), .as_n(as_n), .ds_n(ds_n), .dben_n(),
-	.ecs_n(), .ocs_n(), .ciout_n(), .cbreq_n(cbreq_n), .bus_oe(bus_oe),
+	.ecs_n(), .ocs_n(), .bus_oe(bus_oe),
 	.d_o(d_o), .d_oe(d_oe), .d_i(d_i),
-	.dsack0_n(dsack0_n), .dsack1_n(dsack1_n), .sterm_n(sterm_n), .berr_n(berr_n), .halt_n(1'b1),
-	.avec_n(avec_n), .ciin_n(1'b1), .cback_n(1'b1), .br_n(1'b1), .bg_n(), .bgack_n(1'b1),
+	.dsack0_n(dsack0_n), .dsack1_n(dsack1_n), .berr_n(berr_n), .halt_n(1'b1),
+	.avec_n(avec_n), .br_n(1'b1), .bg_n(), .bgack_n(1'b1),
 	.ipl_n(ipl), .ipend_n(), .reset_n_i(nreset), .reset_n_oe(),
-	.cdis_n(1'b1), .mmudis_n(1'b1), .refill_n(), .status_n(),
+	.cdis_n(1'b1),
 	.dbg_pc(dbg_pc), .dbg_sr(), .dbg_state(), .dbg_inst(), .dbg_halted(),
 	.dbg_vbr(), .dbg_cacr(), .dbg_cache_clear(),
 	.snoop_we(1'b0), .snoop_addr(32'd0), .nmi_vec_nocache(1'b0)
@@ -147,15 +148,15 @@ wire prog_fetch  = (fc == 3'd2 || fc == 3'd6);
 wire in_hand     = (a >= CAPH) && (a < CAPH + 32'h800);
 wire held        = hold_fetch && prog_fetch && ({a[31:2], 2'b00} == {cur_pc[31:2], 2'b00});
 
-// zero-wait synchronous port (no bursts); CPU space terminates asynchronously
+// zero-wait 32-bit port (the MC68020 bus: DSACK, asynchronous)
 always @* begin
-	sterm_n = 1'b1; berr_n = 1'b1; avec_n = 1'b1; dsack0_n = 1'b1; dsack1_n = 1'b1;
+	berr_n = 1'b1; avec_n = 1'b1; dsack0_n = 1'b1; dsack1_n = 1'b1;
 	if (as_asserted) begin
 		if (cpu_space) begin
 			if (a[19:16] == 4'hF) avec_n = 1'b0;     // interrupt acknowledge: autovector
 			else berr_n = 1'b0;                        // breakpoint, coprocessor: absent
 		end else if (!held)
-			sterm_n = 1'b0;
+			{dsack1_n, dsack0_n} = 2'b00;
 	end
 end
 always @* d_i = {rd8({a[31:2], 2'b00}), rd8({a[31:2], 2'b01}), rd8({a[31:2], 2'b10}), rd8({a[31:2], 2'b11})};
@@ -222,7 +223,7 @@ endfunction
 integer wi;
 always @(negedge clk) begin
 	if (!as_asserted) wr_seen <= 0;
-	else if (!cpu_space && !rw && !sterm_n && d_oe && !wr_seen && nreset) begin
+	else if (!cpu_space && !rw && !(dsack0_n && dsack1_n) && d_oe && !wr_seen && nreset) begin
 		wr_seen <= 1;
 		for (wi = 0; wi < 4; wi = wi + 1)
 			if (lanes(a[1:0], siz)[3 - wi]) begin

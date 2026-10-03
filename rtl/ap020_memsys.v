@@ -1,7 +1,7 @@
 //--------------------------------------------------------------------------//
-// AP68030 - MC68030 compatible CPU                                         //
+// AP68020 - MC68020 compatible CPU                                         //
 //                                                                          //
-// ap030_memsys.v - memory subsystem: data unit, prefetch port, caches,     //
+// ap020_memsys.v - memory subsystem: data unit, prefetch port, caches,     //
 // MMU and the bus controller                                               //
 //                                                                          //
 // Data accesses are split into longword portions (at most two, UM 7.2.2).  //
@@ -21,10 +21,10 @@
 // instruction prefetch.                                                    //
 //--------------------------------------------------------------------------//
 
-`include "ap030_defs.svh"
+`include "ap020_defs.svh"
 
-module ap030_memsys
-#(parameter FAST_PORT = 0)
+module ap020_memsys
+#(parameter FAST_PORT = 0, parameter DATA_CACHE = 1)
 (
 	input             clk,
 	input             rst,
@@ -37,7 +37,6 @@ module ap030_memsys
 	input             cacr_ced,
 	input       [7:2] caar_idx,
 	input             cdis,
-	input             mmudis,
 	input             halted,
 
 	// ---- data port ---------------------------------------------------------
@@ -82,24 +81,6 @@ module ap030_memsys
 	output reg        i_fault,
 
 	// ---- MMU instructions and registers ---------------------------------
-	input             op_req,
-	input       [2:0] op_kind,
-	input       [2:0] op_level,
-	input      [31:0] op_la,
-	input       [2:0] op_fc,
-	input       [2:0] op_fcmask,
-	output            op_done,
-	output     [31:0] op_desc_addr,
-	input             reg_we,
-	input       [2:0] reg_sel,
-	input      [31:0] reg_wdata_hi,
-	input      [31:0] reg_wdata_lo,
-	input             reg_fd,
-	output            cfg_err,
-	output     [31:0] tc,
-	output     [31:0] srp_hi, srp_lo, crp_hi, crp_lo,
-	output     [31:0] tt0, tt1,
-	output     [15:0] mmusr,
 
 	output            bus_quiet,    // no posted write, no bus activity (NOP synchronization)
 
@@ -121,7 +102,7 @@ module ap030_memsys
 	input       [1:0] fast_word,
 	input      [31:0] fast_rdata,
 
-	// ---- MC68030 pins ------------------------------------------------------
+	// ---- bus pins (ap020_bus; the MC68020 subset at ap020_top) ---------------
 	output     [31:0] a_o,
 	output      [2:0] fc_o,
 	output      [1:0] siz_o,
@@ -156,26 +137,29 @@ reg         w_ack;
 reg  [31:0] w_rdata;
 reg         w_berr;
 
-ap030_mmu mmu (
-	.clk(clk), .rst(rst),
-	.tr_la(tr_la), .tr_fc(tr_fc), .tr_rw(tr_rw), .tr_rmc(tr_rmc), .mmudis(mmudis),
-	.tr_ok(tr_ok), .tr_fault(tr_fault), .tr_walk(tr_walk), .tr_pa(tr_pa), .tr_ci(tr_ci), .tr_use(tr_use),
-	.walk_req(walk_req), .walk_la(walk_la), .walk_fc(walk_fc), .walk_rw(walk_rw), .walk_rmc(walk_rmc),
-	.walk_done(walk_done),
-	.op_req(op_req), .op_kind(op_kind), .op_level(op_level), .op_la(op_la), .op_fc(op_fc),
-	.op_fcmask(op_fcmask), .op_done(op_done), .op_desc_addr(op_desc_addr),
-	.reg_we(reg_we), .reg_sel(reg_sel), .reg_wdata_hi(reg_wdata_hi), .reg_wdata_lo(reg_wdata_lo),
-	.reg_fd(reg_fd), .cfg_err(cfg_err), .tc(tc), .srp_hi(srp_hi), .srp_lo(srp_lo),
-	.crp_hi(crp_hi), .crp_lo(crp_lo), .tt0(tt0), .tt1(tt1), .mmusr(mmusr),
-	.w_req(w_req), .w_addr(w_addr), .w_rw(w_rw), .w_wdata(w_wdata), .w_ack(w_ack),
-	.w_rdata(w_rdata), .w_berr(w_berr), .w_active(w_active), .busy(mmu_busy)
-);
+// no MMU (MC68020): the physical address is the logical one, nothing is
+// cache inhibited, no access faults and no table search is ever started
+// (the search paths below stay idle)
+assign tr_ok = 1'b1;
+assign tr_fault = 1'b0;
+assign tr_walk = 1'b0;
+assign tr_pa = tr_la;
+assign tr_ci = 1'b0;
+assign walk_done = 1'b0;
+assign w_req = 1'b0;
+assign w_rw = 1'b1;
+assign w_addr = 32'd0;
+assign w_wdata = 32'd0;
+assign w_active = 1'b0;
+assign mmu_busy = 1'b0;
 
 //---------------------------------------------------------------------------
 // caches
 //---------------------------------------------------------------------------
 wire ic_en  = cacr[`CACR_EI] & ~cdis;
-wire dc_en  = cacr[`CACR_ED] & ~cdis;
+// the data cache exists with DATA_CACHE only, and holds native-port memory
+// only (see ap020_top): pin-bus data is never allocated
+wire dc_en  = DATA_CACHE && cacr[`CACR_ED] && ~cdis;
 wire ic_fill_ok = ic_en & ~cacr[`CACR_FI];
 wire dc_fill_ok = dc_en & ~cacr[`CACR_FD];
 
@@ -188,7 +172,7 @@ reg  [31:2] ic_fi_addr;
 reg   [2:0] ic_fi_fc;
 reg  [31:0] ic_fi_data;
 
-ap030_cache #(.FC_BITS(1)) icache (
+ap020_cache #(.FC_BITS(1)) icache (
 	.clk(clk), .rst(rst),
 	.lk_la(ic_lk_la), .lk_fc(ic_lk_fc), .lk_tag_hit(ic_tag_hit), .lk_hit(ic_hit),
 	.lk_line_empty(ic_line_empty), .lk_data(ic_data),
@@ -215,7 +199,7 @@ reg  [31:0] dc_wr_data;
 reg         dc_inv_we;
 reg  [31:0] dc_inv_la;
 
-ap030_cache #(.FC_BITS(3)) dcache (
+ap020_cache #(.FC_BITS(3)) dcache (
 	.clk(clk), .rst(rst),
 	.lk_la(dc_lk_la), .lk_fc(dc_lk_fc), .lk_tag_hit(dc_tag_hit), .lk_hit(dc_hit),
 	.lk_line_empty(dc_line_empty), .lk_data(dc_data),
@@ -283,11 +267,20 @@ assign b_fill_stb = pin_fill || (native_response && b_rw && b_cache && !b_ciout)
 assign b_fill_addr = native_active ? {b_addr[31:4], fast_word} : pin_fill_addr;
 assign b_fill_data = native_active ? fast_rdata : pin_fill_data;
 
-ap030_bus bus (
+// bus slot owner (assigned below): read by the bus request
+localparam OWN_NONE = 2'd0, OWN_WALK = 2'd1, OWN_WB = 2'd2, OWN_DU = 2'd3;
+reg  [1:0] owner;
+reg        own_ifetch;
+
+ap020_bus bus (
 	.clk(clk), .rst(rst),
 	.req(b_req && !native_sel && !native_active), .req_kind(b_kind), .req_addr(b_addr), .req_nbytes(b_nbytes), .req_total(b_total),
 	.req_rw(b_rw), .req_fc(b_fc), .req_rmc(b_rmc), .req_rmc_last(b_rmc_last), .req_ciout(b_ciout),
-	.req_cbreq(b_cbreq), .req_ocs(b_ocs), .req_cache(b_cache), .req_wdata(b_wdata),
+	.req_cbreq(b_cbreq), .req_ocs(b_ocs), .req_wdata(b_wdata),
+	// data on the pin bus is not cached, so no extra cycles complete an
+	// entry (they would read neighbouring I/O registers); instruction
+	// fetches complete their longword as the MC68020's prefetch does
+	.req_cache(b_cache && !(owner == OWN_DU && !own_ifetch)),
 	.req_ack(pin_ack), .busy(pin_busy), .done(pin_done), .rd_data(pin_rdata), .res_berr(pin_berr),
 	.res_avec(pin_avec), .res_ciin(pin_ciin), .fill_stb(pin_fill), .fill_addr(pin_fill_addr),
 	.fill_data(pin_fill_data), .rmc_release(b_rmc_release), .halted(halted), .bus_idle(pin_idle),
@@ -302,9 +295,7 @@ ap030_bus bus (
 //---------------------------------------------------------------------------
 // bus slot ownership
 //---------------------------------------------------------------------------
-localparam OWN_NONE = 2'd0, OWN_WALK = 2'd1, OWN_WB = 2'd2, OWN_DU = 2'd3;
-reg  [1:0] owner;
-reg        own_ifetch;
+// (declared with the bus instance above, which reads them)
 // the slot is free for a new request this clock
 wire slot_free = (owner == OWN_NONE) && !b_req && !b_busy;
 
@@ -777,7 +768,7 @@ always @(posedge clk) begin
 		// The operand may finish before a narrow-port or burst fill does:
 		// r_addr can advance to the next portion and d_fc to the next access.
 		// Use the saved logical line and b_fc, held by the bus slot owner.
-		if (b_fill_stb && owner == OWN_DU && !own_ifetch && dc_fill_ok) begin
+		if (b_fill_stb && owner == OWN_DU && !own_ifetch && dc_fill_ok && native_active) begin
 			dc_fi_we <= 1'b1; dc_fi_addr <= {d_fill_line, b_fill_addr[3:2]}; dc_fi_fc <= b_fc; dc_fi_data <= b_fill_data;
 		end
 

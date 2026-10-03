@@ -1,10 +1,10 @@
 //--------------------------------------------------------------------------//
-// AP68030 - tb_ap030_program.sv                                            //
+// AP68020 - tb_ap020_program.sv                                            //
 //                                                                          //
 // Runs an assembled self-checking program against the processor on a       //
-// pin-level MC68030 bus (FAST_PORT=1 adds the native RAM interface).       //
-// Memory is a 32-bit synchronous (STERM) port with                          //
-// burst support; a 16-bit and an 8-bit asynchronous (DSACK) window exercise //
+// pin-level MC68020 bus (FAST_PORT=1 adds the native RAM interface).       //
+// Memory is a 32-bit asynchronous (DSACK) port (the MC68020 bus has no     //
+// synchronous cycles); a 16-bit and an 8-bit window exercise               //
 // dynamic bus sizing.  The program reports through memory-mapped registers: //
 //   $F100 word  failing test number                                          //
 //   $F102 word  $BAD0 = failed, $600D = all tests passed                     //
@@ -13,8 +13,8 @@
 //   $F120 byte  write must arrive with FC = 1 (MOVES/DFC check)             //
 //   $F130 long  bus error trigger address (0 disables)                       //
 //   $F140 word  wait states for the memory port                             //
-//   $F170 word  bit 0 asserts MMUDIS, bit 1 asserts CDIS                      //
-//   $F174 long  read: bus cycles run with CIOUT asserted                     //
+//   $F170 word  bit 1 asserts CDIS                                          //
+//   $F174 long  read: native-port requests marked cache inhibited           //
 //   $F178 long  read: bus cycles                                             //
 //   $F17C long  read: last effective address the coprocessor model received //
 //   $F180 word  coprocessor save CIR format word (read/write)               //
@@ -25,13 +25,14 @@
 //                     2: write without snoop; $F1BA word bit 0: NMI vector  //
 //                     fetched past the data cache (nmi_vec_nocache)         //
 //   $F1C0 long  watched address; $F1C4 word: FC of its last bus read       //
+//   $F1D0 word  read: bit 0 FAST_PORT, bit 1 DATA_CACHE (the bench build)  //
 //   $F1BC word  coprocessor model: raise this interrupt level at the next  //
 //               command write, and answer the next $0010 with busy again   //
 // Memory map (24-bit decode):                                               //
-//   $000000-$0FFFFF  RAM, 32-bit synchronous, burst                          //
+//   $000000-$0FFFFF  RAM, 32-bit asynchronous (and the native port)        //
 //   $200000-$2FFFFF  RAM alias, 16-bit asynchronous                          //
 //   $300000-$3FFFFF  RAM alias, 8-bit asynchronous                          //
-//   $400000-$4FFFFF  RAM alias, 32-bit asynchronous, CIIN asserted           //
+//   $400000-$4FFFFF  RAM alias, 32-bit asynchronous                         //
 //   $F00000-$F0FFFF  test registers (8-bit lanes on D31-D24, 32-bit port)    //
 //   $FF0000-$FFFFFF  bus error                                               //
 // Loaded with +prog=<hex>; +waits=<n> sets the initial wait states;         //
@@ -39,9 +40,10 @@
 //--------------------------------------------------------------------------//
 
 `timescale 1ns/1ps
-`include "ap030_defs.svh"
+`include "ap020_defs.svh"
 
-module tb_ap030_program #(parameter FAST_PORT = 0);
+module tb_ap020_program #(parameter FAST_PORT = 0,
+	parameter DATA_CACHE = 1);
 
 reg clk = 0;
 always #10 clk = ~clk;
@@ -50,16 +52,16 @@ reg reset_n = 0;
 wire [31:0] a, d_o;
 wire  [2:0] fc;
 wire  [1:0] siz;
-wire        rw, rmc_n, as_n, ds_n, dben_n, ecs_n, ocs_n, ciout_n, cbreq_n, bus_oe, d_oe, bg_n, ipend_n;
-wire        reset_n_oe, refill_n, status_n, dbg_halted, dbg_inst;
+wire        rw, rmc_n, as_n, ds_n, dben_n, ecs_n, ocs_n, bus_oe, d_oe, bg_n, ipend_n;
+wire        reset_n_oe, dbg_halted, dbg_inst;
 integer     insts = 0;
 always @(posedge clk) if (dbg_inst) insts = insts + 1;
 wire [31:0] dbg_pc;
 wire [15:0] dbg_sr;
 wire  [7:0] dbg_state;
 reg  [31:0] d_i;
-reg         dsack0_n = 1, dsack1_n = 1, sterm_n = 1, berr_n = 1, halt_n = 1, avec_n = 1, ciin_n = 1, cback_n = 1;
-reg         br_n = 1, bgack_n = 1, cdis_n = 1, mmudis_n = 1;
+reg         dsack0_n = 1, dsack1_n = 1, berr_n = 1, halt_n = 1, avec_n = 1;
+reg         br_n = 1, bgack_n = 1, cdis_n = 1;
 reg   [2:0] ipl_n = 3'b111;
 
 wire n_req, n_ready, n_rw, n_ci, n_burst, n_match;
@@ -70,19 +72,19 @@ reg n_valid = 0, n_last = 0;
 reg [1:0] n_word = 0;
 reg [31:0] n_rdata = 0;
 wire n_take = n_req && n_ready;
-ap030_top #(.FAST_PORT(FAST_PORT)) dut (
+ap020_top #(.FAST_PORT(FAST_PORT), .DATA_CACHE(DATA_CACHE)) dut (
 	.clk(clk),
     .fast_req(n_req), .fast_ready(n_ready), .fast_match(n_match),
     .fast_addr(n_addr), .fast_fc(n_fc), .fast_rw(n_rw), .fast_ci(n_ci),
     .fast_burst(n_burst), .fast_be(n_be), .fast_wdata(n_wdata),
     .fast_valid(n_valid), .fast_last(n_last), .fast_word(n_word), .fast_rdata(n_rdata),
 	.a(a), .fc(fc), .siz(siz), .rw(rw), .rmc_n(rmc_n), .as_n(as_n), .ds_n(ds_n), .dben_n(dben_n),
-	.ecs_n(ecs_n), .ocs_n(ocs_n), .ciout_n(ciout_n), .cbreq_n(cbreq_n), .bus_oe(bus_oe),
+	.ecs_n(ecs_n), .ocs_n(ocs_n), .bus_oe(bus_oe),
 	.d_o(d_o), .d_oe(d_oe), .d_i(d_i),
-	.dsack0_n(dsack0_n), .dsack1_n(dsack1_n), .sterm_n(sterm_n), .berr_n(berr_n), .halt_n(halt_n),
-	.avec_n(avec_n), .ciin_n(ciin_n), .cback_n(cback_n), .br_n(br_n), .bg_n(bg_n), .bgack_n(bgack_n),
+	.dsack0_n(dsack0_n), .dsack1_n(dsack1_n), .berr_n(berr_n), .halt_n(halt_n),
+	.avec_n(avec_n), .br_n(br_n), .bg_n(bg_n), .bgack_n(bgack_n),
 	.ipl_n(ipl_n), .ipend_n(ipend_n), .reset_n_i(reset_n), .reset_n_oe(reset_n_oe),
-	.cdis_n(cdis_n), .mmudis_n(mmudis_n), .refill_n(refill_n), .status_n(status_n),
+	.cdis_n(cdis_n),
 	.dbg_pc(dbg_pc), .dbg_sr(dbg_sr), .dbg_state(dbg_state), .dbg_halted(dbg_halted), .dbg_inst(dbg_inst),
 	.dbg_vbr(), .dbg_cacr(), .dbg_cache_clear(),
 	.snoop_we(snoop_we), .snoop_addr(snoop_addr), .nmi_vec_nocache(nmi_nc)
@@ -107,8 +109,7 @@ wire is_ram32a  = (region == 4'h4);
 wire is_regs    = (region == 4'hF) && (a[19:16] == 4'h0);
 wire is_berr    = (region == 4'hF) && (a[19:16] == 4'hF);
 wire is_iack    = (fc == 3'd7) && (a[19:16] == 4'hF);
-wire is_sync    = is_ram32 && (fc != 3'd7);
-wire is_async   = !is_sync;
+wire is_async   = 1'b1;          // the MC68020 bus: every cycle is asynchronous
 wire [19:0] ma  = a[19:0];
 
 integer as_cnt = 0;
@@ -128,11 +129,9 @@ always @(posedge clk) begin
 	as_was <= as_asserted;
 	if ((as_was && !as_asserted) || n_take) begin
 		bus_cycles <= bus_cycles + 1;
-		if (n_take ? n_ci : ciout_seen) ciout_cycles <= ciout_cycles + 1;
+		if (n_take && n_ci) ciout_cycles <= ciout_cycles + 1;   // no CIOUT pin: native requests only
 	end
 end
-reg ciout_seen = 0;
-always @(negedge clk) if (as_asserted) ciout_seen <= ~ciout_n; else ciout_seen <= 0;
 integer    reset_len = 0;       // length of the last RESET instruction pulse
 integer    reset_cnt = 0;
 reg        berr_hit;
@@ -201,27 +200,9 @@ wire is_bkpt   = is_cpu && (a[19:16] == 4'h0);
 wire is_cpsp   = is_cpu && (a[19:16] == 4'h2);
 wire is_cp1    = is_cpsp && (a[15:13] == 3'd1);   // coprocessor 1: the model below
 
-// synchronous port: STERM after the wait states, burst with CBACK
-wire sync_ready = is_sync && bus_oe && (as_cnt >= wait_states);
-reg  [1:0] beat_idx = 0;
-reg        sterm_rec = 0;
-always @* begin
-	sterm_n = 1; cback_n = 1;
-	if (is_sync && bus_oe && !as_n) begin
-		sterm_n = ~sync_ready;
-		cback_n = 0;
-	end
-end
-always @(posedge clk) sterm_rec <= ~sterm_n & as_asserted & rw & (~cbreq_n | burst_active);
-reg burst_active = 0;
-always @(negedge clk) begin
-	if (!as_asserted) begin beat_idx <= a[3:2]; burst_active <= 0; end
-	else if (sterm_rec) begin burst_active <= 1; beat_idx <= beat_idx + 1; end
-end
-
 // asynchronous ports
 always @* begin
-	dsack0_n = 1; dsack1_n = 1; berr_n = 1; avec_n = 1; ciin_n = 1;
+	dsack0_n = 1; dsack1_n = 1; berr_n = 1; avec_n = 1;
 	if (as_asserted && (wait_states == 0 || as_cnt >= wait_states + 1) && is_async) begin
 		if (is_iack) begin
 			if (irq_vector == 0) avec_n = 0;
@@ -236,9 +217,7 @@ always @* begin
 		else if (is_ram16) {dsack1_n, dsack0_n} = 2'b01;
 		else if (is_ram8) {dsack1_n, dsack0_n} = 2'b10;
 		else {dsack1_n, dsack0_n} = 2'b00;
-		if (is_ram32a || is_regs) ciin_n = 0;      // I/O and the CIIN window are not cachable
 	end
-	if (berr_hit && is_sync && as_asserted) begin berr_n = 0; end
 end
 
 // read data: the full port width
@@ -263,11 +242,10 @@ always @* begin
 			8'h88: rdata = cp_operand[0];
 			8'h8C: rdata = cp_operand[1];
 			8'hC4: rdata = {13'd0, watch_fc, 16'd0};
+			8'hD0: rdata = {14'd0, DATA_CACHE != 0, FAST_PORT != 0, 16'd0};
 			default: rdata = 32'd0;
 		endcase
-	end else if (is_sync) rdata = {mem[{ma[19:4], beat_idx, 2'b00}], mem[{ma[19:4], beat_idx, 2'b01}],
-	                               mem[{ma[19:4], beat_idx, 2'b10}], mem[{ma[19:4], beat_idx, 2'b11}]};
-	else if (is_ram16) rdata = {mem[{ma[19:1], 1'b0}], mem[{ma[19:1], 1'b1}], 16'hxxxx};
+	end else if (is_ram16) rdata = {mem[{ma[19:1], 1'b0}], mem[{ma[19:1], 1'b1}], 16'hxxxx};
 	else if (is_ram8) rdata = {mem[ma], 24'hxxxxxx};
 	else rdata = {mem[lw_base], mem[lw_base+1], mem[lw_base+2], mem[lw_base+3]};
 end
@@ -387,7 +365,7 @@ task reg_write;
 			8'h32: berr_addr[15:8] = v;
 			8'h33: berr_addr[7:0] = v;
 			8'h41: wait_states = v;
-			8'h71: begin mmudis_n = ~v[0]; cdis_n = ~v[1]; end
+			8'h71: cdis_n = ~v[1];
 			8'hB0: dma_addr[31:24] = v;
 			8'hB1: dma_addr[23:16] = v;
 			8'hB2: dma_addr[15:8] = v;
@@ -427,9 +405,8 @@ always @(posedge clk) begin
 	if (!as_asserted) wr_seen <= 0;
 end
 `include "tb_cp_model.svh"
-always @(posedge clk) if ($test$plusargs("bustrace") && as_asserted && rw && (!sterm_n || !dsack0_n || !dsack1_n))
-	$display("%8d RD a=%08x fc=%0d siz=%b d=%08x burst=%0d", clocks, a, fc, siz, rdata, burst_active);
-always @(negedge clk) if (is_sync && as_asserted && !sterm_n && !rw && d_oe) capture_write;
+always @(posedge clk) if ($test$plusargs("bustrace") && as_asserted && rw && (!dsack0_n || !dsack1_n))
+	$display("%8d RD a=%08x fc=%0d siz=%b d=%08x", clocks, a, fc, siz, rdata);
 
 //---------------------------------------------------------------------------
 // run

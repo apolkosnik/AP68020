@@ -1,7 +1,7 @@
 //--------------------------------------------------------------------------//
-// AP68030 - MC68030 compatible CPU                                         //
+// AP68020 - MC68020 compatible CPU                                         //
 //                                                                          //
-// ap030_cache.v - one 256-byte on-chip cache (UM Section 6)                //
+// ap020_cache.v - one 256-byte on-chip cache (UM Section 6)                //
 //                                                                          //
 // 16 lines of four longword entries, direct mapped by A7:A4, one valid     //
 // bit per entry, tag = A31:A8 plus the function code bits (FC2 for the     //
@@ -15,7 +15,7 @@
 // clears the addressed entry's valid bit without altering the tag.         //
 //--------------------------------------------------------------------------//
 
-module ap030_cache
+module ap020_cache
 #(
 	parameter FC_BITS = 3        // 1: compare FC2 only (instruction cache)
 )

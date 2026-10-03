@@ -1,4 +1,4 @@
-// AP68030 core - instruction decoder (included by ap030_core.v)
+// AP68020 core - instruction decoder (included by ap020_core.v)
 //
 // Decodes the word `dw` (the word being dispatched, or ir afterwards) into
 // the first sequencer state and the generic-path controls.  Instructions
@@ -491,11 +491,9 @@ always @* begin
 
 	//------------------------------------------------------------------ 1111 MMU / coprocessor
 	default: begin
-		if (dw[11:9] == 3'b000) begin
-			// MMU instructions (CpID 0): privileged, the second word decides
-			dc_first = S_PMMU0;
-			dc_priv = 1'b1;
-		end else begin
+		// every CpID, 0 included (an MC68851 there): the coprocessor
+		// protocol; with no coprocessor answering it ends in Line F
+		begin
 			case (dw[8:6])
 				3'b000: dc_first = S_CP0;                  // cpGEN
 				3'b001: begin
@@ -516,7 +514,7 @@ end
 // instructions whose second word is part of the operation (popped with the opcode)
 wire dc_needs_ext = (dc_first == S_MULDIV0 && dw[15:12] == 4'h4) || (dc_first == S_CHK2_0) ||
                     (dc_first == S_CAS0) || (dc_first == S_CAS2_0) || (dc_first == S_BF0) ||
-                    (dc_first == S_MOVES0) || (dc_first == S_MOVEC) || (dc_first == S_PMMU0) ||
+                    (dc_first == S_MOVES0) || (dc_first == S_MOVEC) ||
                     (dc_first == S_CP0) || (dc_first == S_CPSCC) || (dc_first == S_CPDBCC) || (dc_first == S_CPTRAP) ||
                     (dc_first == S_MOVEP0) || (dc_first == S_MOVEM0) || (dc_first == S_LINK) || (dc_first == S_RTD) || (dc_first == S_STOP) ||
                     (dc_first == S_DBCC) || (dc_first == S_PACK && (dw[8:6] == 3'b101 || dw[8:6] == 3'b110) && dw[15:12] == 4'h8);

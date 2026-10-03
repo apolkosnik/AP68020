@@ -4,13 +4,13 @@ cd "$(dirname "$0")"
 RTL=../rtl
 if [ "${NOBUILD:-0}" != 1 ]; then
 verilator --binary --timing -Wno-fatal -Wno-lint -Wno-style -Wno-WIDTH -Wno-TIMESCALEMOD -Wno-CASEINCOMPLETE \
-  --output-split 20000 --output-split-cfuncs 500 -CFLAGS -O1 -I$RTL -I$RTL/core --top-module tb_ap030_program \
-  --Mdir build/obj_prog -o tb_prog tb_ap030_program.sv $RTL/ap030_top.v $RTL/ap030_core.v $RTL/ap030_memsys.v \
-  $RTL/ap030_mmu.v $RTL/ap030_cache.v $RTL/ap030_bus.v $RTL/ap030_alu.v $RTL/ap030_muldiv.v $RTL/ap030_regfile.v \
+  --output-split 20000 --output-split-cfuncs 500 -CFLAGS -O1 -I$RTL -I$RTL/core --top-module tb_ap020_program \
+  --Mdir build/obj_prog -o tb_prog tb_ap020_program.sv $RTL/ap020_top.v $RTL/ap020_core.v $RTL/ap020_memsys.v \
+  $RTL/ap020_cache.v $RTL/ap020_bus.v $RTL/ap020_alu.v $RTL/ap020_muldiv.v $RTL/ap020_regfile.v \
   > build/build_prog.log 2>&1 || { grep -E "^%Error" build/build_prog.log | head; exit 1; }
 fi
 t=$1; shift
-vasmm68k_mot -Fbin -m68030 -m68851 -no-opt -o build/$t.bin asm/$t.s > build/$t.asm.log 2>&1 || { cat build/$t.asm.log; exit 1; }
+vasmm68k_mot -Fbin -m68020 -m68851 -no-opt -o build/$t.bin asm/$t.s > build/$t.asm.log 2>&1 || { cat build/$t.asm.log; exit 1; }
 python3 bin2hex.py build/$t.bin build/$t.hex
 ./build/obj_prog/tb_prog +prog=build/$t.hex "$@" > build/$t.log 2>&1
 grep -E "program reports|TEST FAILED|ALL TESTS|FAIL:|halted" build/$t.log | head -5

@@ -1,4 +1,4 @@
-; AP68030 startup for compiled C programs: vectors, stack, caches, main,
+; AP68020 startup for compiled C programs: vectors, stack, caches, main,
 ; verdict through the testbench registers
 	section	"CODE",code
 	xref	_main
