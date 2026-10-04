@@ -11,7 +11,7 @@
 //   $F110 word  interrupt request level (0 releases IPL)                     //
 //   $F112 word  interrupt vector for the next IACK (0 = autovector)          //
 //   $F120 byte  write must arrive with FC = 1 (MOVES/DFC check)             //
-//   $F130 long  bus error trigger address (0 disables)                       //
+//   $F130 long  bus error trigger address (0 disables; odd: that word only) //
 //   $F140 word  wait states for the memory port                             //
 //   $F170 word  bit 1 asserts CDIS                                          //
 //   $F174 long  read: bus cycles run with CIOUT asserted                     //
@@ -138,7 +138,10 @@ always @(negedge clk) if (as_asserted) ciout_seen <= ~ciout_n; else ciout_seen <
 integer    reset_len = 0;       // length of the last RESET instruction pulse
 integer    reset_cnt = 0;
 reg        berr_hit;
-always @* berr_hit = (berr_addr != 0) && as_asserted && ({a[31:2], 2'b00} == {berr_addr[31:2], 2'b00}) && (fc != 3'd7);
+// longword granularity; an odd trigger address (bit 0 set) matches only the
+// word it lies in, so a later cycle of a dynamically sized transfer can fault
+always @* berr_hit = (berr_addr != 0) && as_asserted && (fc != 3'd7) &&
+                     (berr_addr[0] ? (a[31:1] == berr_addr[31:1]) : (a[31:2] == berr_addr[31:2]));
 always @* ipl_n = ~irq_level;
 always @(posedge clk) begin
 	if (irq_delay != 0) begin
@@ -365,6 +368,21 @@ task bench_report;
 		         bench_runs, bench_clks, $itor(bench_clks) / $itor(bench_runs), m, dps, dps / 1757.0, dps / 1757.0 / mhz);
 	end
 endtask
+// RMC (UM 7.6): a locked sequence is data cycles only, and RMC negates when
+// it ends -- also when CAS ends it without the write.  A lock left behind
+// shows as RMC on an instruction fetch or as RMC held on an idle bus.
+integer rmc_idle = 0;
+always @(posedge clk) begin
+	if (as_asserted && !rmc_n && fc[1:0] == 2'b10) begin
+		if (errors < 3) $display("FAIL: RMC asserted on an instruction fetch at %08x, clock %0d", a, clocks);
+		errors = errors + 1;
+	end
+	if (!rmc_n && !as_asserted) rmc_idle = rmc_idle + 1; else rmc_idle = 0;
+	if (rmc_idle == 64) begin
+		$display("FAIL: RMC held for 64 clocks on an idle bus, clock %0d", clocks);
+		errors = errors + 1;
+	end
+end
 reg        done = 0;
 task reg_write;
 	input [7:0] off; input [7:0] v;

@@ -16,7 +16,8 @@
 ;   $F00114 word  delay in clocks           $F00116 word  level applied after the delay
 ;   $F00118 word  BKPT replacement opcode (0 = BERR)
 ;   $F00120 byte  must be written with FC=1
-;   $F00130 long  bus error trigger address (longword granularity, 0 = off)
+;   $F00130 long  bus error trigger address (longword granularity, 0 = off;
+;                 an odd address faults only the word it lies in)
 ;   $F00160 long  length of the last RESET instruction pulse
 
 FAILREG	equ	$F00100
@@ -572,6 +573,37 @@ bk1:	bkpt	#2
 	moveq	#10,d1
 	add.l	([WCI+$3A40]),d1
 	chkl	d1,15,111
+
+	; a longword on the 16-bit port faulting on its second word: the frame
+	; describes the remaining word (UM 8.2.1), so the rerun does not repeat
+	; the first one -- for a read and for a posted write
+	movec	cacr,d5
+	moveq	#0,d0		; caches off: every access reaches the bus
+	movec	d0,cacr
+	move.l	#$5566AABB,(W16+$3B00).l
+	nop
+	move.l	#W16+$3B03,BERRREG
+	move.l	(W16+$3B00).l,d0
+	chkl	d0,$5566AABB,140
+	chkw	lastvec,2,141
+	move.l	lastfa,d1
+	chkl	d1,W16+$3B02,142
+	move.w	lastssw,d1
+	and.l	#$0070,d1	; RW set, SIZE word
+	chkl	d1,$0060,143
+	move.l	#W16+$3B13,BERRREG
+	move.l	#$77889900,(W16+$3B10).l
+	nop			; the fault is taken at a boundary
+	nop
+	chkw	lastfmt,$A,144
+	move.l	lastfa,d1
+	chkl	d1,W16+$3B12,145
+	move.w	lastssw,d1
+	and.l	#$0070,d1	; RW clear, SIZE word
+	chkl	d1,$0020,146
+	move.l	(W16+$3B10).l,d1
+	chkl	d1,$77889900,147
+	movec	d5,cacr
 
 ;---------------------------------------------------------------- software completion: the handler supplies the data
 	move.w	#M_SWDATA,mode
