@@ -49,9 +49,9 @@ reg nreset = 0;
 wire [31:0] a, d_o;
 wire  [2:0] fc;
 wire  [1:0] siz;
-wire        rw, as_n, ds_n, d_oe, bus_oe;
+wire        rw, as_n, ds_n, d_oe, bus_oe, cbreq_n;
 reg  [31:0] d_i;
-reg         berr_n, avec_n, dsack0_n, dsack1_n;
+reg         sterm_n, berr_n, avec_n, dsack0_n, dsack1_n;
 reg   [2:0] ipl;               // active low
 wire [31:0] dbg_pc;
 
@@ -71,10 +71,10 @@ ap020_top #(.FAST_PORT(FAST_PORT), .DATA_CACHE(DATA_CACHE)) dut (
  .fast_burst(n_burst), .fast_be(n_be), .fast_wdata(n_wdata),
  .fast_valid(n_valid), .fast_last(n_last), .fast_word(n_word), .fast_rdata(n_rdata),
 	.a(a), .fc(fc), .siz(siz), .rw(rw), .rmc_n(), .as_n(as_n), .ds_n(ds_n), .dben_n(),
-	.ecs_n(), .ocs_n(), .bus_oe(bus_oe),
+	.ecs_n(), .ocs_n(), .ciout_n(), .cbreq_n(cbreq_n), .bus_oe(bus_oe),
 	.d_o(d_o), .d_oe(d_oe), .d_i(d_i),
-	.dsack0_n(dsack0_n), .dsack1_n(dsack1_n), .berr_n(berr_n), .halt_n(1'b1),
-	.avec_n(avec_n), .br_n(1'b1), .bg_n(), .bgack_n(1'b1),
+	.dsack0_n(dsack0_n), .dsack1_n(dsack1_n), .sterm_n(sterm_n), .berr_n(berr_n), .halt_n(1'b1),
+	.avec_n(avec_n), .ciin_n(1'b1), .cback_n(1'b1), .br_n(1'b1), .bg_n(), .bgack_n(1'b1),
 	.ipl_n(ipl), .ipend_n(), .reset_n_i(nreset), .reset_n_oe(),
 	.cdis_n(1'b1),
 	.dbg_pc(dbg_pc), .dbg_sr(), .dbg_state(), .dbg_inst(), .dbg_halted(),
@@ -148,15 +148,15 @@ wire prog_fetch  = (fc == 3'd2 || fc == 3'd6);
 wire in_hand     = (a >= CAPH) && (a < CAPH + 32'h800);
 wire held        = hold_fetch && prog_fetch && ({a[31:2], 2'b00} == {cur_pc[31:2], 2'b00});
 
-// zero-wait 32-bit port (the MC68020 bus: DSACK, asynchronous)
+// zero-wait synchronous port (no bursts); CPU space terminates asynchronously
 always @* begin
-	berr_n = 1'b1; avec_n = 1'b1; dsack0_n = 1'b1; dsack1_n = 1'b1;
+	sterm_n = 1'b1; berr_n = 1'b1; avec_n = 1'b1; dsack0_n = 1'b1; dsack1_n = 1'b1;
 	if (as_asserted) begin
 		if (cpu_space) begin
 			if (a[19:16] == 4'hF) avec_n = 1'b0;     // interrupt acknowledge: autovector
 			else berr_n = 1'b0;                        // breakpoint, coprocessor: absent
 		end else if (!held)
-			{dsack1_n, dsack0_n} = 2'b00;
+			sterm_n = 1'b0;
 	end
 end
 always @* d_i = {rd8({a[31:2], 2'b00}), rd8({a[31:2], 2'b01}), rd8({a[31:2], 2'b10}), rd8({a[31:2], 2'b11})};
@@ -223,7 +223,7 @@ endfunction
 integer wi;
 always @(negedge clk) begin
 	if (!as_asserted) wr_seen <= 0;
-	else if (!cpu_space && !rw && !(dsack0_n && dsack1_n) && d_oe && !wr_seen && nreset) begin
+	else if (!cpu_space && !rw && !sterm_n && d_oe && !wr_seen && nreset) begin
 		wr_seen <= 1;
 		for (wi = 0; wi < 4; wi = wi + 1)
 			if (lanes(a[1:0], siz)[3 - wi]) begin

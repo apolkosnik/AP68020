@@ -1,4 +1,4 @@
-; AP68020 in MC68020-compatible mode (ap020_top cpu020 = 1; bench CPU020=1)
+; AP68020: the MC68020 programming model on the MC68030 bus
 ; assembled with vasmm68k_mot -Fbin -m68020 -m68851
 ;
 ;   - CACR keeps only E (bit 0) and F (bit 1); the 68030's data cache,
@@ -9,7 +9,9 @@
 ;     stacked PC = the instruction), in user mode as well (no privilege
 ;     check of their own)
 ;   - the hidden data cache: E enables it (a read hit ignores memory
-;     changed behind it), C clears it, without E every read is a bus read
+;     changed behind it), C clears it, without E every read is a bus read;
+;     a line miss bursts the whole line (CBREQ/CBACK)
+;   - CIIN: the window at $400000 is never cached, with E on
 ;   - the instruction cache: data writes do not update it, C clears it, CE
 ;     clears the entry CAAR selects
 ;
@@ -23,6 +25,7 @@
 FAILREG	equ	$F00100
 DONEREG	equ	$F00102
 W16	equ	$200000
+WCI	equ	$400000		; 32-bit asynchronous, CIIN asserted
 CFGREG	equ	$F001D0		; bench build: bit 0 FAST_PORT, bit 1 DATA_CACHE
 
 exccnt	equ	$3800		; word: exceptions taken
@@ -118,13 +121,12 @@ mm5:	pmove	tc,(a0)
 	chkl	d0,mm5,22
 
 ;---------------------------------------------------------------- the hidden data cache
-; it holds native-port memory only (FAST_PORT, with DATA_CACHE): with both,
-; a read hit ignores memory changed behind it; otherwise every data read
-; is a bus read, as on the MC68020
+; with DATA_CACHE it caches as the MC68030's does (the pin bus, CIIN
+; permitting, and the native port): a read hit ignores memory changed
+; behind it; without it every data read is a bus read
 	move.w	CFGREG,d4
-	and.w	#3,d4
-	cmp.w	#3,d4
-	beq.s	dc_on
+	btst	#1,d4
+	bne.s	dc_on
 	moveq	#1,d0			; E: no data cache to see
 	movec	d0,cacr
 	move.l	#$11111111,($4010).l
@@ -157,7 +159,34 @@ dc_on:	moveq	#1,d0			; E
 	move.l	#$55555555,W16+$4010
 	move.l	($4010).l,d1
 	chkl	d1,$55555555,35
+	; a line miss bursts the line: the neighbours arrive with it
+	move.l	#$A0A0A0A0,W16+$4100
+	move.l	#$A1A1A1A1,W16+$4104
+	move.l	#$A2A2A2A2,W16+$4108
+	move.l	#$A3A3A3A3,W16+$410C
+	moveq	#1+8,d0			; E, C
+	movec	d0,cacr
+	move.l	($4100).l,d1		; miss: the whole line
+	chkl	d1,$A0A0A0A0,36
+	move.l	#$B1B1B1B1,W16+$4104	; memory only
+	move.l	($4104).l,d1		; hit: the burst brought the old value
+	chkl	d1,$A1A1A1A1,37
+	moveq	#0,d0
+	movec	d0,cacr
 dc_done:
+
+;---------------------------------------------------------------- CIIN
+; the window at $400000 asserts CIIN: never cached, with the caches on
+	moveq	#1+8,d0			; E, C
+	movec	d0,cacr
+	move.l	#$C0C0C0C0,W16+$4200
+	move.l	WCI+$4200,d1
+	chkl	d1,$C0C0C0C0,38
+	move.l	#$C1C1C1C1,W16+$4200	; memory behind
+	move.l	WCI+$4200,d1		; a bus read again
+	chkl	d1,$C1C1C1C1,39
+	moveq	#0,d0
+	movec	d0,cacr
 
 ;---------------------------------------------------------------- the instruction cache
 	moveq	#1+8,d0			; E, C

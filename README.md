@@ -1,9 +1,10 @@
 # AP68020
 
 A synthesisable MC68020 in Verilog: the complete 68020 integer instruction
-set, the instruction cache, the coprocessor interface and the MC68020 bus,
-validated with Verilator against the *MC68020 User's Manual*, the *M68000
-Family Programmer's Reference Manual* and the WinUAE cputest corpus.
+set, the instruction cache and the coprocessor interface, on the MC68030
+bus, validated with Verilator against the *MC68020 User's Manual*, the
+*MC68030 User's Manual* (for the bus), the *M68000 Family Programmer's
+Reference Manual* and the WinUAE cputest corpus.
 
 AP68020 is derived from [AP68030](https://github.com/apolkosnik/AP68030)
 and fixed as an MC68020:
@@ -15,22 +16,26 @@ and fixed as an MC68020:
   entry, with CAAR); the MC68030's data cache, burst and write-allocate
   bits do not exist, so software (Kickstart, for one) identifies an
   MC68020;
-- **the MC68020 bus**: asynchronous cycles with DSACKx and 8/16/32-bit
-  dynamic bus sizing, half-clock bus states S0-S5, ECS/OCS, DBEN, RMC,
-  BERR/HALT retry and rerun, bus arbitration, interrupt, breakpoint and
-  coprocessor acknowledge cycles in CPU space, and the RESET instruction
-  driving the RESET pin for 512 clocks. There is no STERM, burst, CIIN,
-  CIOUT, MMUDIS, STATUS or REFILL.
+- **the MC68030 bus**, which is faster than the MC68020's: asynchronous
+  cycles with DSACKx and 8/16/32-bit dynamic bus sizing, synchronous
+  two-clock cycles with STERM, burst line fills with CBREQ/CBACK, CIIN and
+  CIOUT, half-clock bus states S0-S5, ECS/OCS, DBEN, RMC, BERR/HALT retry
+  and rerun, bus arbitration, interrupt, breakpoint and coprocessor
+  acknowledge cycles in CPU space, and the RESET instruction driving the
+  RESET pin for 512 clocks. There is no MMUDIS, STATUS or REFILL. A board
+  built for the MC68020 bus ties STERM and CBACK high, uses DSACKx and
+  asserts CIIN for I/O (or builds without the data cache).
 
 Two options go beyond the MC68020, for integrations that want speed:
 
 - `FAST_PORT=1`: a native request/response port with line bursts, which an
   integration uses for its internal RAM instead of the pin bus;
-- `DATA_CACHE=1` (the default): a 256-byte data cache for memory read
-  through the native port. It is invisible to software: CACR's E enables
-  it with the instruction cache, C clears it. Pin-bus data is never
-  cached. Memory changed behind the processor must be cleared with C or
-  reported through the snoop inputs.
+- `DATA_CACHE=1` (the default): the MC68030's 256-byte data cache, which
+  caches as it does there: pin-bus reads unless CIIN is asserted, and the
+  native port. It is invisible to software: CACR's E enables it with the
+  instruction cache and their bursts, C clears it. Memory changed behind
+  the processor must be cleared with C or reported through the snoop
+  inputs.
 
 ## Integration
 
@@ -71,13 +76,13 @@ before the target accepts a new request.
 ## Layout
 
 ```
-rtl/ap020_top.v        pin-level top: MC68020 signal set, reset synchroniser, options
+rtl/ap020_top.v        pin-level top: MC68030 bus signal set, reset synchroniser, options
 rtl/ap020_core.v       instruction unit: prefetch pipe, decoder, sequencer, exceptions
 rtl/core/*.vh          sequencer states (exec_a/b/c), decoder, frame layout, tasks
 rtl/ap020_memsys.v     data/instruction units: cache lookup, write buffer, native port,
                        bus arbitration between writes, data and prefetch
 rtl/ap020_cache.v      256-byte direct mapped cache (16 lines x 4 entries)
-rtl/ap020_bus.v        bus controller: S0-S5 states, sizing, retry, arbitration
+rtl/ap020_bus.v        bus controller: S0-S5 states, sizing, STERM, bursts, retry, arbitration
 rtl/ap020_alu.v        ALU, barrel shifter, BCD
 rtl/ap020_muldiv.v     32x32 multiply, 64/32 divide
 rtl/ap020_regfile.v    D0-D7, A0-A6, USP/ISP/MSP
@@ -99,7 +104,7 @@ module), Python 3; vbcc for Dhrystone.
 
 ```
 cd tb
-sh run_tests.sh                            # the MC68020 pin bus
+sh run_tests.sh                            # the pin bus
 FAST_PORT=1 sh run_tests.sh build_fast     # RAM through the native port, data cache on
 FAST_PORT=1 DATA_CACHE=0 sh run_tests.sh build_nodc
 ./run_prog.sh t_m020 +trace                # one program, with the instruction trace
@@ -118,8 +123,8 @@ profiling).
 |----------------|------------------------------------------------------------------------------|
 | `t_integer`    | the integer instruction set, addressing modes, condition codes, bit fields, CAS, MOVEM, MOVEP, BCD |
 | `t_exceptions` | traps and frames ($0/$1/$2/$9/$A/$B), illegal/A-line/F-line, CHK/CHK2, privilege, MOVEC/MOVES, trace T1/T0, interrupts (levels, autovector, vectored, spurious, level 7 edge), STOP, master stack and throwaway frames, RTE format errors, BKPT, bus error rerun and software completion on reads, posted writes and instruction fetches, address errors, RESET |
-| `t_bus`        | dynamic bus sizing through 32/16/8-bit ports, misaligned operands, line crossings, MOVEP, TAS/CAS RMW cycles, code from narrow ports |
-| `t_m020`       | the MC68020 specifics: CACR bits, MMU instructions taking Line F (supervisor and user mode), the data cache option, the instruction cache with C and CE/CAAR |
+| `t_bus`        | dynamic bus sizing through 32/16/8-bit and synchronous ports with the caches on, misaligned operands, line crossings, MOVEP, TAS/CAS RMW cycles, code from narrow ports |
+| `t_m020`       | the MC68020 specifics: CACR bits, MMU instructions taking Line F (supervisor and user mode), the data cache option and its burst fills, the CIIN window, the instruction cache with C and CE/CAAR |
 | `t_cp`         | the coprocessor protocol: every response primitive, cpGEN with all EA forms, cpBcc/cpDBcc/cpScc/cpTRAPcc, cpSAVE/cpRESTORE, busy, exceptions requested by the coprocessor |
 | `t_dblfault`   | a bus error while stacking a bus error frame halts the processor |
 
@@ -130,14 +135,14 @@ profiling).
 
 `syn/run_syn.sh` runs Quartus Prime 17.0 (Cyclone V 5CSEBA6U23I7, 50 MHz
 constraint, ports as virtual pins with a 2 ns budget) and prints the Fmax
-summary. AP68020 reaches 51.8 MHz at the slow 1100 mV 100 C corner, with
-+0.59 ns worst-case setup slack at 50 MHz across the four corners.
+summary. AP68020 reaches 52.7 MHz at the slow 1100 mV 100 C corner, with
++0.52 ns worst-case setup slack at 50 MHz across the four corners.
 
 | FPGA resource (Cyclone V) | used |
 |---|---|
-| ALMs | 14,230 (34 %) |
-| registers | 6,844 |
-| block RAM | 2 M10K, 4,096 bits |
+| ALMs | 14,936 (36 %) |
+| registers | 7,612 |
+| block RAM | 5 M10K, 4,096 bits |
 | DSP blocks | 4 |
 
 Dhrystone 2.1 (`tb/c`, vbcc `-O2 -speed -cpu=68020`, caches on, 2000
@@ -146,9 +151,13 @@ runs, checked against its final values), simulated and normalised to
 
 | configuration | clocks per Dhrystone | DMIPS |
 |---|---:|---:|
-| MC68020 pin bus, no wait states | 4549 | 6.26 |
+| synchronous burst pin bus, no wait states, data cache | 2437 | 11.68 |
+| synchronous burst pin bus, no wait states, no data cache | 3116 | 9.13 |
 | native port, data cache | 2496 | 11.40 |
 | native port, no data cache | 4263 | 6.68 |
+
+On the MC68020's asynchronous bus (DSACK only, no data cache) the same
+build took 4549 clocks, 6.26 DMIPS.
 
 These are simulation results; AP68020 has not been run on a board.
 

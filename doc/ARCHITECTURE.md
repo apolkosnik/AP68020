@@ -1,11 +1,12 @@
 # AP68020 architecture
 
-AP68020 is the AP68030 core fixed as an MC68020: no MMU, the MC68020's
-CACR and the MC68020 bus (asynchronous cycles only). It was derived from
-AP68030 and keeps its structure, so references are to the MC68030 User's
-Manual (UM) sections unless the MC68020 User's Manual is named; the two
-describe the same integer core, exception model, coprocessor interface and
-asynchronous bus.
+AP68020 is the AP68030 core fixed as an MC68020 -- no MMU, the MC68020's
+CACR -- that keeps the MC68030 bus (synchronous cycles, bursts, CIIN,
+CIOUT), which is faster than the MC68020's asynchronous one. It was derived
+from AP68030 and keeps its structure, so references are to the MC68030
+User's Manual (UM) sections unless the MC68020 User's Manual is named; the
+two describe the same integer core, exception model, coprocessor interface
+and asynchronous bus.
 
 ## Overview
 
@@ -143,9 +144,9 @@ cartridge) is always seen. The Minimig integration uses both.
 
 **Caches** (`ap020_cache.v`): the instruction cache is 256 bytes, direct
 mapped, 16 lines of four longword entries with individual valid bits,
-tagged by the address and FC2. It caches every program fetch (the MC68020
-has no cache inhibit input); a longword fetch from a narrow port is
-completed from the extra cycles, as the MC68020's prefetch reads longwords.
+tagged by the address and FC2. Bursts fill the missing entries of a line;
+on a narrow port the entry is completed from the extra cycles (UM
+6.1.3.1). CIIN inhibits fills and is ignored on writes.
 CACR is the MC68020's (MC68020 UM 7.3): E enables, F freezes, C clears all
 entries, CE clears the entry CAAR selects; nothing else is stored. CDIS
 disables the caches. The organisation differs from the MC68020's 64 single
@@ -153,30 +154,29 @@ longword entries only in which stale entries survive when code is changed
 without a cache clear.
 
 The data cache is not part of the MC68020. With `DATA_CACHE` (default 1) the
-same 256-byte cache holds memory read through the native port -- RAM the
-integration has declared -- and is invisible to software: CACR's E enables
-it with the instruction cache, C clears it, and nothing reads it back. Data
-on the pin bus is never allocated and never completed from extra cycles,
-since nothing on the MC68020 bus says what is I/O. Software that changes
-native-port memory behind the processor (a DMA master, or the same RAM
-reachable at another address) must clear the caches with C or report the
-writes through the snoop inputs; an MC68020 program that does not expect a
-data cache will otherwise see stale data. `DATA_CACHE = 0` builds without
-it.
+MC68030's 256-byte data cache (tagged by FC2-0) caches as it does there --
+pin-bus reads unless CIIN is asserted, with bursts, and native-port reads
+-- and is invisible to software: CACR's E enables it with the instruction
+cache, C clears it, and nothing reads it back. Writes update a line they
+hit and never allocate (there is no WA). Software that changes cached
+memory behind the processor (a DMA master, or the same RAM reachable at
+another address) must clear the caches with C or report the writes
+through the snoop inputs; an MC68020 program that does not expect a data
+cache will otherwise see stale data. `DATA_CACHE = 0` builds without it.
 
 ## Bus controller (ap020_bus.v, UM 7)
 
 The controller implements the MC68030 protocol, a superset of the
-MC68020's; `ap020_top` ties STERM, CBACK and CIIN off, so only the MC68020's
-asynchronous cycles run. Requests carry an address, byte count, total
-operand size (for SIZ), direction, function code and the RMC and OCS
-attributes. The controller runs S0-S5:
+MC68020's. Requests carry an address, byte count, total operand size (for
+SIZ), direction, function code and the RMC, CIOUT, CBREQ and OCS
+attributes. The controller runs S0-S5 with the timing of UM Figures 7-7 to
+7-61:
 
 - asynchronous cycles terminate on DSACKx (three clocks plus wait states),
   with the port size read from DSACK1/0 and the operand assembled or the
   write lanes driven per Tables 7-4 and 7-5;
-- (synchronous cycles and bursts exist in the controller but are never
-  used: there is no STERM or CBACK on the MC68020)
+- synchronous cycles terminate on STERM (two clocks), bursts of four
+  longwords with modulo-4 address wrap continue while CBACK is asserted;
 - ECS and OCS pulse for the first half clock, DBEN follows UM 7.3;
 - BERR, BERR with HALT (retry), HALT (single cycle) and late BERR after
   DSACK are handled as UM 7.5; retry restarts the cycle from S0 after both
@@ -210,13 +210,14 @@ exceptions of UM 10.5.
 ## Verification
 
 `tb/tb_ap020_bus.sv` drives the bus controller alone against slave models
-of every termination it implements (including the synchronous and burst
-cycles AP68020 does not use) and checks the data, the fills and the cycle
-lengths in half clocks.
+of every termination (asynchronous 8/16/32-bit ports, synchronous with and
+without bursts, CIIN, BERR, late BERR, retry, HALT, CBACK negated early)
+and checks the data, the fills and the cycle lengths in half clocks.
 
 `tb/tb_ap020_program.sv` wraps the whole processor with 1 MB of RAM
-reachable through different asynchronous ports (32-bit, 16-bit, 8-bit) and
-optionally the native port, a bus error region, an interrupt
+reachable through different ports (synchronous burst, 16-bit, 8-bit,
+32-bit with CIIN) and optionally the native port, a bus error region, an
+interrupt
 controller, the breakpoint and coprocessor acknowledge cycles and a
 scripted coprocessor; the self-test programs in `tb/asm` run on it.
 `+waits=n` adds wait states to every port, which reorders the interaction
