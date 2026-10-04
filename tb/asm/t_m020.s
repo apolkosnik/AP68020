@@ -12,6 +12,8 @@
 ;     changed behind it), C clears it, without E every read is a bus read;
 ;     a line miss bursts the whole line (CBREQ/CBACK)
 ;   - CIIN: the window at $400000 is never cached, with E on
+;   - the hidden data cache stays coherent: writes through another
+;     function code (MOVES) and writes made while it is off reach it
 ;   - the instruction cache: data writes do not update it, C clears it, CE
 ;     clears the entry CAAR selects
 ;
@@ -174,6 +176,39 @@ dc_on:	moveq	#1,d0			; E
 	moveq	#0,d0
 	movec	d0,cacr
 dc_done:
+
+;---------------------------------------------------------------- data cache coherence
+; MC68020 software knows of no data cache, so it must never see one go
+; stale: a write through another function code (supervisor and user data
+; share memory: MOVES writes with DFC, reads with SFC) and a write made
+; while the caches are off both reach any cached copy.  Without the data
+; cache these hold trivially.
+	moveq	#1,d0			; user data space for MOVES
+	movec	d0,dfc
+	movec	d0,sfc
+	moveq	#1+8,d0			; E, C
+	movec	d0,cacr
+	move.l	#$61616161,($4300).l
+	move.l	($4300).l,d1		; cached as supervisor data (FC 5)
+	move.l	#$62626262,d2
+	moves.l	d2,($4300).l		; written as user data (FC 1)
+	move.l	($4300).l,d1
+	chkl	d1,$62626262,45
+	moves.l	($4310).l,d1		; cached as user data (FC 1)
+	move.l	#$63636363,($4310).l	; written as supervisor data (FC 5)
+	moves.l	($4310).l,d1
+	chkl	d1,$63636363,46
+	move.l	#$64646464,($4320).l
+	move.l	($4320).l,d1		; cached
+	moveq	#0,d0			; caches off
+	movec	d0,cacr
+	move.l	#$65656565,($4320).l	; written while off
+	moveq	#1,d0			; on again, not cleared
+	movec	d0,cacr
+	move.l	($4320).l,d1
+	chkl	d1,$65656565,47
+	moveq	#0,d0
+	movec	d0,cacr
 
 ;---------------------------------------------------------------- CIIN
 ; the window at $400000 asserts CIIN: never cached, with the caches on
