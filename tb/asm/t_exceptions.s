@@ -55,6 +55,7 @@ M_FIXBERR equ	4		; clear the bus error trigger, RTE (rerun)
 M_SWDATA equ	5		; software completion: DIB, clear DF
 M_ADDRFIX equ	6		; address error: PC field += 2 (skip the jump)
 M_FIXPC	equ	7		; set the PC field to fixpc
+M_SKIP2T equ	8		; skip 2 and clear T1/T0 in the stacked SR (trace stops)
 
 fixpc	equ	$3824		; long
 
@@ -490,16 +491,17 @@ rte_bad:
 rte_ok:
 	failt	78
 rte_ok2:
-	; the MC68030 clears T1/T0 before the format error: the frame's SR has
-	; no trace bits, so the handler's RTE does not resume tracing
-	move.w	#M_SKIP2,mode
+	; the MC68020 keeps T1/T0 for the format error (the MC68030 clears
+	; them first): the frame's SR has T0; the handler clears it so its RTE
+	; does not resume tracing
+	move.w	#M_SKIP2T,mode
 	move.l	a7,a5
 	move.w	#$5000,-(a7)
 	move.l	#rte_ok,-(a7)
 	move.w	#$2700,-(a7)
 	move.w	#$6700,sr	; T0: the RTE is a change of flow
 	rte
-	chkw	lastsr,$2700,126
+	chkw	lastsr,$6700,126
 	andi.w	#$3FFF,sr
 	chkw	lastvec,14,127
 	move.l	a5,a7
@@ -893,6 +895,11 @@ hg1:
 	bne.s	hg2
 	addq.l	#2,2(a6)
 hg2:
+	cmp.w	#M_SKIP2T,d6
+	bne.s	hg3
+	addq.l	#2,2(a6)
+	andi.w	#$3FFF,(a6)
+hg3:
 	movem.l	(sp)+,d6
 	rte
 

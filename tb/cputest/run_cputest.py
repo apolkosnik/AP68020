@@ -9,6 +9,7 @@ ap020_top by tb_cputest.sv under Verilator.
 
 Examples:
   ./run_cputest.py /home/adam/Downloads/data_030.zip                 # every integer group
+  ./run_cputest.py data020.zip         # the 68020 corpus (cputestgen with cpu=68020)
   ./run_cputest.py data --group Default --instruction 'ADD*'
   ./run_cputest.py data --group IRQ --instruction NOP --slice 0001 --verbose
 """
@@ -72,7 +73,7 @@ def corpus_root(source: Path, work: Path) -> Path:
                 zf.extractall(dest)
             stamp.write_text(str(source))
         source = dest
-    for sub in ("data", "data030"):
+    for sub in ("data", "data020", "data030"):
         if (source / sub).is_dir():
             source = source / sub
     if not any(GROUP_RE.match(p.name) for p in source.iterdir() if p.is_dir()):
