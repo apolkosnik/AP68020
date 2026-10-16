@@ -356,6 +356,19 @@ t0_taken:
 	move.w	exccnt,d1
 	and.l	#$FFFF,d1
 	chkl	d1,3,53
+	; the trace taken after the TRAP reports the TRAP as the traced
+	; instruction (its six-word frame's instruction address), not the
+	; handler it entered; the handler clears T1, so no other trace follows
+	clr.w	exccnt
+	move.w	#M_CLRT,mode
+	move.w	#$A700,sr
+tt1:	trap	#1
+	move.w	#M_RTE,mode
+	move.w	exccnt,d1
+	and.l	#$FFFF,d1
+	chkl	d1,2,148
+	move.l	tracepc,d0
+	chkl	d0,tt1,149
 
 ;---------------------------------------------------------------- interrupts: masking, autovector, vectored, spurious
 	clr.w	exccnt
@@ -895,6 +908,10 @@ hg1:
 	bne.s	hg2
 	addq.l	#2,2(a6)
 hg2:
+	cmp.w	#M_CLRT,d6
+	bne.s	hg2a
+	andi.w	#$3FFF,(a6)
+hg2a:
 	cmp.w	#M_SKIP2T,d6
 	bne.s	hg3
 	addq.l	#2,2(a6)
