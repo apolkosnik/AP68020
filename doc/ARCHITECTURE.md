@@ -99,8 +99,15 @@ is being pushed, which reuses the counters). RTE reloads them and, with
 DF set, reruns the faulted cycle from the SSW, fault address and DOB; a
 cleared DF delivers the DIB (reads) or drops the cycle (writes); an RMW
 fault reruns the whole instruction with DF set and counts as emulated
-with DF clear (UM 8.2.2). A version mismatch in word 27 is a format error
-(UM 8.1.8). Misaligned operands whose later portion faults keep the
+with DF clear (UM 8.2.2). Stage C and B images are restored
+independently: with RC set and RB clear stage C is refetched and the
+frame's B word takes the place of the second word fetched (UM 6.2.1).
+Before loading anything RTE validates the frame (UM 6.1.12): it reads the
+frame's last longword and, for the long frame, the version number in word
+27 (a mismatch is a format error, UM 8.1.8). A fault there is an ordinary
+read bus error, rerun with DF or completed by software with DF clear,
+after which the RTE goes on; only faults while loading the internal state
+halt. Misaligned operands whose later portion faults keep the
 portions already transferred in words 37-38 and merge them on the rerun;
 for writes the validated first portion is still written, as the real
 part's bus would have done.
