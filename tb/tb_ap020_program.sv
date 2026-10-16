@@ -26,6 +26,11 @@
 //                     fetched past the data cache (nmi_vec_nocache)         //
 //   $F1C0 long  watched address; $F1C4 word: FC of its last bus read       //
 //   $F1D0 word  read: bit 0 FAST_PORT, bit 1 DATA_CACHE (the bench build)  //
+//   $F1D4 byte  write: bit 0 enables the CALLM/RTM access control model     //
+//               (CPU space A19-A16 = 0001; disabled it ends in BERR);      //
+//               read long: IAL, DAL, 0, FC of the descriptor address      //
+//   $F1D5 byte  write: the access status the model returns                  //
+//   $F1D8 long  read: the descriptor address written to the model          //
 //   $F1BC word  coprocessor model: raise this interrupt level at the next  //
 //               command write, and answer the next $0010 with busy again   //
 // Memory map (24-bit decode):                                               //
@@ -205,6 +210,13 @@ wire is_cpu    = (fc == 3'd7);
 wire is_bkpt   = is_cpu && (a[19:16] == 4'h0);
 wire is_cpsp   = is_cpu && (a[19:16] == 4'h2);
 wire is_cp1    = is_cpsp && (a[15:13] == 3'd1);   // coprocessor 1: the model below
+// CALLM/RTM access control hardware (MC68020 UM 9.8): CAL $00, access status
+// $04, IAL $08, DAL $0C (bytes on D31-D24), descriptor address $40 + 4 x FC
+wire is_ac     = is_cpu && (a[19:16] == 4'h1);
+reg        ac_en = 0;
+reg  [7:0] ac_cal = 8'h5A, ac_status = 8'd0, ac_ial = 8'd0, ac_dal = 8'd0;
+reg [31:0] ac_desc = 32'd0;
+reg  [2:0] ac_desc_fc = 3'd0;
 
 // synchronous port: STERM after the wait states, burst with CBACK
 wire sync_ready = is_sync && bus_oe && (as_cnt >= wait_states);
@@ -236,6 +248,8 @@ always @* begin
 			if (bkpt_op == 0) berr_n = 0; else {dsack1_n, dsack0_n} = 2'b00;
 		end else if (is_cp1) begin
 			{dsack1_n, dsack0_n} = 2'b00;
+		end else if (is_ac && ac_en) begin
+			{dsack1_n, dsack0_n} = 2'b00;
 		end else if (is_cpu) berr_n = 0;
 		else if (is_berr || berr_hit) berr_n = 0;
 		else if (is_ram16) {dsack1_n, dsack0_n} = 2'b01;
@@ -254,6 +268,7 @@ always @* begin
 	if (is_iack) rdata = {24'd0, irq_vector};
 	else if (is_bkpt) rdata = {bkpt_op, 16'd0};
 	else if (is_cp1) rdata = cp_rdata;
+	else if (is_ac) rdata = (a[7:0] == 8'h00) ? {ac_cal, 24'd0} : (a[7:0] == 8'h04) ? {ac_status, 24'd0} : 32'd0;
 	else if (is_regs) begin
 		case (a[7:0])
 			8'h10: rdata = {13'd0, irq_level, 16'd0};
@@ -269,6 +284,8 @@ always @* begin
 			8'h8C: rdata = cp_operand[1];
 			8'hC4: rdata = {13'd0, watch_fc, 16'd0};
 			8'hD0: rdata = {14'd0, DATA_CACHE != 0, FAST_PORT != 0, 16'd0};
+			8'hD4: rdata = {ac_ial, ac_dal, 13'd0, ac_desc_fc};
+			8'hD8: rdata = ac_desc;
 			default: rdata = 32'd0;
 		endcase
 	end else if (is_sync) rdata = {mem[{ma[19:4], beat_idx, 2'b00}], mem[{ma[19:4], beat_idx, 2'b01}],
@@ -304,7 +321,15 @@ task capture_write;
 		endcase
 		if ($test$plusargs("bustrace")) $display("%8d WR a=%08x fc=%0d siz=%b be=%b d=%08x", clocks, a, fc, siz, be, d_o);
 		if (is_cp1) cp_write(a[4:0], be, d_o);
-		else if (is_regs) begin
+		else if (is_ac) begin
+			case (a[7:0])
+				8'h08: ac_ial = d_o[31:24];
+				8'h0C: ac_dal = d_o[31:24];
+				default: if (a[7:0] >= 8'h40 && a[7:0] < 8'h60) begin
+					ac_desc = d_o; ac_desc_fc = a[4:2];
+				end
+			endcase
+		end else if (is_regs) begin
 			// registers: byte lanes per address (byte 0 on D31-D24)
 			for (i = 0; i < 4; i = i + 1) if (be[i]) reg_write({a[7:2], 2'b00} + i[7:0], d_o[31 - 8*i -: 8]);
 		end else begin
@@ -409,6 +434,8 @@ task reg_write;
 			8'h33: berr_addr[7:0] = v;
 			8'h41: wait_states = v;
 			8'h71: cdis_n = ~v[1];
+			8'hD4: ac_en = v[0];
+			8'hD5: ac_status = v;
 			8'hB0: dma_addr[31:24] = v;
 			8'hB1: dma_addr[23:16] = v;
 			8'hB2: dma_addr[15:8] = v;

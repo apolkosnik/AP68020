@@ -15,7 +15,7 @@ mkdir -p "$WORK"
 SRC="$RTL/ap020_top.v $RTL/ap020_core.v $RTL/ap020_memsys.v $RTL/ap020_cache.v \
      $RTL/ap020_bus.v $RTL/ap020_alu.v $RTL/ap020_muldiv.v $RTL/ap020_regfile.v"
 
-PROGS="t_integer t_exceptions t_bus t_m020 t_cp"
+PROGS="t_integer t_exceptions t_bus t_m020 t_cp t_callm t_rec_rmw_postincrement t_rec_software_moves_byte t_rec_software_movem_word t_rec_pipeline_completion t_rec_rte_validation"
 HALTPROGS="t_dblfault"
 
 echo "== assembling test programs =="

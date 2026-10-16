@@ -398,10 +398,15 @@ task check_trace_frame; reg [31:0] sp, pcv; reg [15:0] srv;
 			if (pcv !== e_trace_pc) mismatch("trace PC", e_trace_pc, pcv);
 		end else if (e_trace == 0 && (flags & F_NORMAL_END)) begin
 			// the corpus records no trace here because the native runner does
-			// not check one; the 68030 traces the instruction, stacking the
-			// post-instruction SR and the address of the terminating ILLEGAL
+			// not check one.  Tracing on at the start: the tested instruction
+			// is traced, stacking the address after it (the generator's
+			// e_trace_pc: a filler NOP, or the terminating ILLEGAL).  Tracing
+			// turned on by the instruction (MOVE to SR...): the next one is
+			// traced, so the trace is taken at the terminating ILLEGAL.
 			if (((srv ^ e_sr[15:0]) & e_srmask[15:0]) != 0) mismatch("trace SR", e_sr, srv);
-			if (pcv !== e_pc) mismatch("trace PC", e_pc, pcv);
+			if (i_sr[15:14] != 2'b00) begin
+				if (pcv !== e_trace_pc) mismatch("trace PC", e_trace_pc, pcv);
+			end else if (pcv !== e_pc) mismatch("trace PC", e_pc, pcv);
 		end
 	end endtask
 

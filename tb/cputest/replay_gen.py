@@ -562,6 +562,11 @@ def generate(header_path: str, dat_path: str, out_path: str,
                                                   last_exception) if exp_exc else ExceptionSpec()
                         if exp_exc and payload is not None and payload:
                             last_exception = exspec
+                        if exp_exc == 0:
+                            # a trace the corpus does not record (FLAG_NORMAL_END)
+                            # stacks the address after the tested instruction:
+                            # the filler NOP when one follows it, not the ILLEGAL
+                            exspec.trace_pc = expected["pc"] & 0xFFFFFFFF
 
                         flags = FLAG_FPU if fpumode else 0
                         if exp_exc == 1:
